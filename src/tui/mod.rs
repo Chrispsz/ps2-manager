@@ -329,6 +329,14 @@ fn ui(f: &mut ratatui::Frame, app: &mut App) {
 }
 
 pub async fn run_tui(root: PathBuf) -> Result<()> {
+    use crossterm::tty::IsTty;
+    if !std::io::stdout().is_tty() {
+        return Err(crate::error::Ps2Error::Other(
+            "TUI requer terminal interativo (TTY) — use os subcomandos CLI (info/scan/install/…) \
+             ou rode dentro de um terminal real."
+                .into(),
+        ));
+    }
     let mut terminal = ratatui::init();
     let res = tui_loop(&mut terminal, root).await;
     ratatui::restore();
