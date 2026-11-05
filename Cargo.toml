@@ -1,0 +1,27 @@
+[package]
+name = "ps2-manager"
+version = "0.1.0"
+edition = "2021"
+description = "Gerenciador nativo Linux para coleções PS2/OPL — ISO9660, ZSO, VMC, ul.cfg, deploy OPL-Mod-PTBR"
+license = "MIT"
+repository = "https://github.com/Chrispsz/OPL-Mod-PTBR"
+
+[dependencies]
+anyhow = "1"
+thiserror = "1"
+clap = { version = "4", features = ["derive"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "fs", "io-util", "sync", "time"] }
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls", "stream"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+lz4_flex = "0.11"
+rayon = "1"
+zip = { version = "2", default-features = false, features = ["deflate"] }
+image = { version = "0.25", default-features = false, features = ["png", "jpeg"] }
+ratatui = "0.29"
+crossterm = "0.28"
+
+[profile.release]
+lto = true
+codegen-units = 1
+strip = true
