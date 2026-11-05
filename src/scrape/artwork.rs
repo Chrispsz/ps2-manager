@@ -69,7 +69,6 @@ pub async fn fetch_covers(
         }
         let permit = sem.clone().acquire_owned().await.unwrap();
         let client = client.clone();
-        let id = e.game_id.clone();
         let dest = dest.clone();
         let urls = cover_urls(&e.game_id, extra_regions);
         handles.push(tokio::spawn(async move {
