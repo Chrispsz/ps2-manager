@@ -20,6 +20,27 @@ enum UiMsg {
     Log(String),
     Games(Vec<GameEntry>),
     Progress(Option<(String, u64, u64)>), // (label, done, total; total=0 → indeterminado)
+    Busy(bool),
+}
+
+/// Toggles do painel [F3] — Deploy de Boot Essencial.
+#[derive(Clone, Copy)]
+struct BkOpts {
+    include_opl: bool,
+    include_wle: bool,
+    include_configs: bool,
+    overwrite: bool,
+}
+
+impl Default for BkOpts {
+    fn default() -> Self {
+        Self {
+            include_opl: true,
+            include_wle: true,
+            include_configs: false,
+            overwrite: false,
+        }
+    }
 }
 
 struct App {
@@ -30,10 +51,17 @@ struct App {
     progress: Option<(String, u64, u64)>,
     busy: bool,
     table_state: ratatui::widgets::TableState,
+    bk_open: bool,
+    bk_sel: usize,
+    bk_opts: BkOpts,
+    bk_kit: (String, String),
 }
 
 impl App {
     fn new(root: PathBuf) -> Self {
+        let (bk_name, bk_spec) = crate::deploy::bootkit::default_manifest()
+            .map(|m| (m.meta.kit_name, m.meta.spec))
+            .unwrap_or_else(|_| ("Boot Kit Essencial PS2".into(), "?".into()));
         Self {
             root,
             games: Vec::new(),
@@ -42,6 +70,10 @@ impl App {
             progress: None,
             busy: false,
             table_state: ratatui::widgets::TableState::default(),
+            bk_open: false,
+            bk_sel: 0,
+            bk_opts: BkOpts::default(),
+            bk_kit: (bk_name, bk_spec),
         }
     }
 
@@ -99,6 +131,7 @@ impl App {
         tokio::task::spawn_blocking(move || {
             let res = compress_iso(&g.path, &out, Some(counter));
             let _ = tx2.send(UiMsg::Progress(None));
+            let _ = tx2.send(UiMsg::Busy(false));
             match res {
                 Ok((comp, tot)) => {
                     let _ = tx2.send(UiMsg::Log(format!(
@@ -164,8 +197,89 @@ impl App {
                 }
             }
             let _ = tx2.send(UiMsg::Progress(None));
+            let _ = tx2.send(UiMsg::Busy(false));
         });
         self.log("deploy BOOT_MC iniciado…");
+    }
+
+    /// Painel [F3] — monta o Boot Kit Essencial em root/BOOT_MC.
+    fn run_bootkit(&mut self, tx: mpsc::UnboundedSender<UiMsg>) {
+        if self.busy {
+            self.log("ocupado — aguarde a operação atual");
+            return;
+        }
+        self.busy = true;
+        let opts = self.bk_opts;
+        let tx2 = tx.clone();
+        let root = self.root.clone();
+        let token = std::env::var("GITHUB_TOKEN").ok();
+        tokio::spawn(async move {
+            let _ = tx2.send(UiMsg::Log("boot kit: resolvendo releases no GitHub…".into()));
+            let manifest = match crate::deploy::bootkit::default_manifest() {
+                Ok(mut m) => {
+                    crate::deploy::bootkit::apply_flags(
+                        &mut m,
+                        opts.include_opl,
+                        opts.include_wle,
+                        opts.include_configs,
+                    );
+                    m
+                }
+                Err(e) => {
+                    let _ = tx2.send(UiMsg::Log(format!("✗ boot kit: manifest: {e}")));
+                    let _ = tx2.send(UiMsg::Busy(false));
+                    return;
+                }
+            };
+            match GitHubClient::new(token) {
+                Ok(client) => {
+                    let counter = Arc::new(AtomicU64::new(0));
+                    let txc = tx2.clone();
+                    let c2 = counter.clone();
+                    tokio::spawn(async move {
+                        loop {
+                            tokio::time::sleep(Duration::from_millis(250)).await;
+                            let v = c2.load(Ordering::Relaxed);
+                            if txc.send(UiMsg::Progress(Some(("Boot Kit".into(), v, 0)))).is_err() {
+                                break;
+                            }
+                            if SHUTDOWN.load(Ordering::Relaxed) {
+                                break;
+                            }
+                        }
+                    });
+                    match crate::deploy::bootkit::assemble(&root, &manifest, &client, counter, opts.overwrite).await {
+                        Ok(rep) => {
+                            for a in &rep.assets {
+                                let line = match &a.status {
+                                    crate::deploy::bootkit::AssetStatus::Ok { bytes, sha256, .. } => {
+                                        format!("✓ {} ({} sha256:{}…)", a.target, crate::cli::fmt_size(*bytes), &sha256[..8])
+                                    }
+                                    crate::deploy::bootkit::AssetStatus::Skipped(w) => {
+                                        format!("⊘ {} ({w})", a.target)
+                                    }
+                                    crate::deploy::bootkit::AssetStatus::Failed(m) => {
+                                        format!("✗ {}: {m}", a.target)
+                                    }
+                                };
+                                let _ = tx2.send(UiMsg::Log(line));
+                            }
+                            let ok = rep.assets.iter().filter(|a| matches!(a.status, crate::deploy::bootkit::AssetStatus::Ok { .. })).count();
+                            let _ = tx2.send(UiMsg::Log(format!("✓ {}: {ok} arquivos em {}", rep.kit_name, rep.dest.display())));
+                        }
+                        Err(e) => {
+                            let _ = tx2.send(UiMsg::Log(format!("✗ boot kit falhou: {e}")));
+                        }
+                    }
+                }
+                Err(e) => {
+                    let _ = tx2.send(UiMsg::Log(format!("✗ cliente GitHub: {e}")));
+                }
+            }
+            let _ = tx2.send(UiMsg::Progress(None));
+            let _ = tx2.send(UiMsg::Busy(false));
+        });
+        self.log("boot kit: montagem de /BOOT_MC/ iniciada…");
     }
 
     fn covers(&mut self, tx: mpsc::UnboundedSender<UiMsg>) {
@@ -188,6 +302,28 @@ impl App {
     }
 
     async fn on_key(&mut self, code: KeyCode, tx: mpsc::UnboundedSender<UiMsg>) -> bool {
+        if self.bk_open {
+            match code {
+                KeyCode::Esc | KeyCode::F(3) => {
+                    self.bk_open = false;
+                }
+                KeyCode::Down | KeyCode::Char('j') => {
+                    self.bk_sel = (self.bk_sel + 1).min(3);
+                }
+                KeyCode::Up | KeyCode::Char('k') => {
+                    self.bk_sel = self.bk_sel.saturating_sub(1);
+                }
+                KeyCode::Char(' ') => match self.bk_sel {
+                    0 => self.bk_opts.include_opl = !self.bk_opts.include_opl,
+                    1 => self.bk_opts.include_wle = !self.bk_opts.include_wle,
+                    2 => self.bk_opts.include_configs = !self.bk_opts.include_configs,
+                    _ => self.bk_opts.overwrite = !self.bk_opts.overwrite,
+                },
+                KeyCode::Enter => self.run_bootkit(tx),
+                _ => {}
+            }
+            return false;
+        }
         match code {
             KeyCode::Char('q') | KeyCode::Esc => return true,
             KeyCode::Down | KeyCode::Char('j') => {
@@ -206,6 +342,9 @@ impl App {
             KeyCode::Char('c') => self.compress_selected(tx).await,
             KeyCode::Char('d') => self.deploy(tx),
             KeyCode::Char('a') => self.covers(tx),
+            KeyCode::F(3) if !self.busy => {
+                self.bk_open = true;
+            }
             _ => {}
         }
         false
@@ -214,6 +353,86 @@ impl App {
 
 fn trunc(s: &str, n: usize) -> String {
     crate::cli::trunc(s, n)
+}
+
+fn centered_rect(pct_x: u16, pct_y: u16, r: ratatui::layout::Rect) -> ratatui::layout::Rect {
+    let v = ratatui::layout::Layout::default()
+        .direction(ratatui::layout::Direction::Vertical)
+        .constraints([
+            ratatui::layout::Constraint::Percentage((100 - pct_y) / 2),
+            ratatui::layout::Constraint::Percentage(pct_y),
+            ratatui::layout::Constraint::Percentage((100 - pct_y) / 2),
+        ])
+        .split(r);
+    ratatui::layout::Layout::default()
+        .direction(ratatui::layout::Direction::Horizontal)
+        .constraints([
+            ratatui::layout::Constraint::Percentage((100 - pct_x) / 2),
+            ratatui::layout::Constraint::Percentage(pct_x),
+            ratatui::layout::Constraint::Percentage((100 - pct_x) / 2),
+        ])
+        .split(v[1])[1]
+}
+
+fn bk_popup(app: &App) -> ratatui::widgets::Paragraph<'static> {
+    use ratatui::style::Color;
+    use ratatui::style::Modifier;
+    use ratatui::style::Style;
+    use ratatui::text::Line;
+    use ratatui::text::Span;
+
+    let o = app.bk_opts;
+    let opts: [(usize, bool, &str); 4] = [
+        (0, o.include_opl, "Incluir OPL-Mod-PTBR (compilação recente)"),
+        (1, o.include_wle, "Incluir wLaunchELF_ISR (exFAT/BDM)"),
+        (2, o.include_configs, "Incluir atalhos no FREMCB.CNF / CONFIG.INI"),
+        (3, o.overwrite, "Sobrescrever configurações existentes na mídia"),
+    ];
+    let mut lines: Vec<Line<'static>> = Vec::new();
+    lines.push(Line::from(format!("Kit    : {}", app.bk_kit.0)));
+    lines.push(Line::from(format!("Spec   : {}", app.bk_kit.1)));
+    lines.push(Line::from("Origem : Chrispsz/OPL-Mod-PTBR (release oficial)"));
+    lines.push(Line::from(""));
+    lines.push(Line::from(Span::styled(
+        "Opções de injeção:",
+        Style::default().add_modifier(Modifier::BOLD),
+    )));
+    for (idx, on, label) in opts {
+        let sel = idx == app.bk_sel;
+        let mark = if on { "[x]" } else { "[ ]" };
+        let mark_style = if on {
+            Style::default().fg(Color::Green)
+        } else {
+            Style::default().fg(Color::DarkGray)
+        };
+        let spans = vec![
+            Span::from(if sel { "▶ " } else { "  " }),
+            Span::styled(mark, mark_style),
+            Span::from(format!(" {label}")),
+        ];
+        let line = if sel {
+            Line::from(spans).style(Style::default().add_modifier(Modifier::BOLD))
+        } else {
+            Line::from(spans)
+        };
+        lines.push(line);
+    }
+    lines.push(Line::from(""));
+    lines.push(Line::from(format!(
+        "Destino: {}/BOOT_MC",
+        app.root.display()
+    )));
+    lines.push(Line::from(""));
+    lines.push(Line::from(Span::styled(
+        "↑/↓ seleciona · [ESPAÇO] alterna · [ENTER] gerar · [F3] fecha",
+        Style::default().fg(Color::DarkGray),
+    )));
+    ratatui::widgets::Paragraph::new(lines).block(
+        ratatui::widgets::Block::default()
+            .borders(ratatui::widgets::Borders::ALL)
+            .title(" DEPLOY DE BOOT ESSENCIAL ")
+            .border_style(Style::default().fg(Color::Green)),
+    )
 }
 
 fn ui(f: &mut ratatui::Frame, app: &mut App) {
@@ -293,6 +512,7 @@ fn ui(f: &mut ratatui::Frame, app: &mut App) {
         ratatui::widgets::ListItem::new("[C] comprimir ZSO"),
         ratatui::widgets::ListItem::new("[A] baixar capas"),
         ratatui::widgets::ListItem::new("[D] deploy FMCB PT-BR"),
+        ratatui::widgets::ListItem::new("[F3] boot kit essencial"),
         ratatui::widgets::ListItem::new("[R] rescan"),
         ratatui::widgets::ListItem::new("[Q] sair"),
     ];
@@ -326,6 +546,12 @@ fn ui(f: &mut ratatui::Frame, app: &mut App) {
             .title("Log"),
     );
     f.render_widget(log_widget, v[next_chunk]);
+
+    if app.bk_open {
+        let popup = centered_rect(76, 58, area);
+        f.render_widget(ratatui::widgets::Clear, popup);
+        f.render_widget(bk_popup(app), popup);
+    }
 }
 
 pub async fn run_tui(root: PathBuf) -> Result<()> {
@@ -370,7 +596,7 @@ async fn tui_loop(
     });
 
     let mut app = App::new(root);
-    app.log("q sair · ↑↓ navegar · r rescan · c ZSO · a capas · d deploy PT-BR");
+    app.log("q sair · ↑↓ navegar · r rescan · c ZSO · a capas · d deploy PT-BR · F3 boot kit");
     app.rescan();
 
     loop {
@@ -399,6 +625,7 @@ async fn tui_loop(
                         }
                     }
                     Some(UiMsg::Progress(p)) => app.progress = p,
+                    Some(UiMsg::Busy(b)) => app.busy = b,
                     None => break,
                 }
             }

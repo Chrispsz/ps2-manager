@@ -1,0 +1,101 @@
+# Boot Kit Essencial PS2 — manifest de assets (Mega Prompt 5)
+# O manifest é embutido no binário; para customizar, copie este arquivo e rode:
+#   ps2-manager deploy bootkit --manifest /caminho/bootkit.toml
+#
+# Regras de seleção da cena (Mega Prompt 5):
+#   * suporte nativo exFAT + BDM (nada de FAT32 fatiado)
+#   * SHA256 validado antes de gravar em mídia
+#   * ELFs sjpacked/ps2-packed quando disponíveis (economia em MC 16MB)
+#   * releases oficiais (incluindo builds automáticos "latest" da cena)
+
+[meta]
+kit_name = "Boot Kit Essencial PS2 (PT-BR)"
+spec = "megaprompt5 rev1"
+
+[[assets]]
+id = "opl_ptbr"
+target = "APPS/OPL.ELF"
+description = "Open PS2 Loader — OPL-Mod-PTBR (release oficial, BDM/exFAT)"
+enabled = true
+
+[assets.source]
+kind = "opl_ptbr_kit"
+inner = "OPNPS2LD.ELF"
+
+[[assets]]
+id = "wlaunchelf"
+target = "APPS/WLAUNCHELF.ELF"
+description = "wLaunchELF_ISR — exFAT + MX4SIO/BDM (mass:/USB)"
+enabled = true
+
+[assets.source]
+kind = "github_release"
+repo = "israpps/wLaunchELF_ISR"
+asset = "BOOT-EXFAT-MX4SIO.ELF"
+
+[[assets]]
+id = "memory_annihilator"
+target = "APPS/MEMORY_ANNIHILATOR.ELF"
+description = "Memory Card Annihilator — manutenção/formato de MC (sjpacked)"
+enabled = true
+
+[assets.source]
+kind = "github_zip"
+repo = "ffgriever-pl/Memory-Card-Annihilator"
+asset = "MemoryCardAnihilator_*.zip"
+inner = "mca_new/mca-packed.elf"
+
+[[assets]]
+id = "gsm"
+target = "APPS/GSM.ELF"
+description = "GSM — Graphics Synthesizer Mode Selector (opcional; sem release estável no GitHub hoje — habilite apontando a fonte própria no manifest)"
+enabled = false
+
+[assets.source]
+kind = "github_release"
+repo = "ps2homebrew/GSM"
+asset = "GSM.ELF"
+
+[[assets]]
+id = "boot_loader"
+target = "BOOT/BOOT.ELF"
+description = "PS2BBL — bootloader moderno (COMPRESSED/sjpacked), variante USB/mass"
+enabled = true
+
+[assets.source]
+kind = "github_7z"
+repo = "israpps/PlayStation2-Basic-BootLoader"
+tag = "latest"
+asset = "PS2BBL.7z"
+inner = "PS2/COMPRESSED_PS2BBL.ELF"
+
+[[assets]]
+id = "boot_config"
+target = "BOOT/CONFIG.INI"
+description = "Configuração do PS2BBL (atalhos/launch keys)"
+enabled = true
+
+[assets.source]
+kind = "github_7z"
+repo = "israpps/PlayStation2-Basic-BootLoader"
+tag = "latest"
+asset = "PS2BBL.7z"
+inner = "SYS-CONF/PS2BBL.INI"
+
+[[assets]]
+id = "fremcb"
+target = "SYS-CONF/FREMCB.CNF"
+description = "Layout de teclas FreeMcBoot (R1=OPL PT-BR, R2=uLaunchELF)"
+enabled = true
+
+[assets.source]
+kind = "builtin"
+template = '''
+# FREMCB.CNF — gerado pelo PS2 Manager (Boot Kit Essencial)
+# Layout Controlado Manual Assistido: R1 abre o OPL PT-BR, R2 abre o wLaunchELF.
+# Os arquivos do kit são transportados via mass: e copiados para mc0:.
+name_pad1_R1=OPL PT-BR
+path_pad1_R1=mc0:/APPS/OPL.ELF
+name_pad1_R2=uLaunchELF
+path_pad1_R2=mc0:/APPS/WLAUNCHELF.ELF
+'''

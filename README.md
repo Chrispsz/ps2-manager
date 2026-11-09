@@ -20,7 +20,8 @@ Substitui USBUtil, HDL Dump e OPL Manager (via Wine) com uma suíte 100% Rust �
 | **Cheats** | `cheats` | Converte PNACH (PCSX2) → `CHT/<ID>.cht` nativo (formato PS2RD do `cheatman.c`: 16 hex digits, tipos byte/word/extended mapeados para raw CB) |
 | **VMC** | `vmc list` / `vmc export` | Lê superblock genvmc (384 B), caminha FAT e lista saves; exportação `.psu` (experimental) |
 | **Deploy PT-BR** | `deploy` | Baixa o `OPL-PTBR-Mod-Kit-*.zip` da release mais recente (incl. prereleases) e gera `BOOT_MC/{OPL,BOOT,APPS,SYS-CONF}` com instruções |
-| **TUI** | `tui` | Dashboard Ratatui: biblioteca, ações rápidas `[C]ZSO [A]capas [D]deploy`, barra de progresso e log |
+| **Boot Kit Essencial** | `bootkit` | Monta `/BOOT_MC/` com os ELFs mais atuais da cena: OPL-Mod-PTBR + **wLaunchELF_ISR** (exFAT/MX4SIO) + **PS2BBL** + **Memory Card Annihilator**, com SHA256 e fonte de cada asset ([detalhes](docs/BOOT_KIT.md)) |
+| **TUI** | `tui` | Dashboard Ratatui: biblioteca, ações rápidas `[C]ZSO [A]capas [D]deploy [F3]boot kit`, barra de progresso e log |
 
 ## Build
 
@@ -53,6 +54,10 @@ ps2-manager cfg /media/$USER/PS2_SD --gsm-vmode 2
 
 # Deploy do OPL PT-BR para o memory card (via uLaunchELF)
 GITHUB_TOKEN=ghp_xxx ps2-manager deploy /media/$USER/PS2_SD
+
+# Boot Kit Essencial: OPL + wLaunchELF_ISR + PS2BBL + MCA em /BOOT_MC/
+ps2-manager bootkit /media/$USER/PS2_SD
+ps2-manager bootkit --list   # fontes/variantes do manifest embutido
 ```
 
 ### Token GitHub

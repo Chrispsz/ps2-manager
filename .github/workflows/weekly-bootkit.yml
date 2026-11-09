@@ -1,0 +1,57 @@
+name: Weekly Boot Kit Essencial
+
+on:
+  schedule:
+    - cron: "0 6 * * 1" # segundas-feiras 06:00 UTC
+  workflow_dispatch:
+
+jobs:
+  kit:
+    name: Montar Boot Kit Essencial
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo registry and build
+        uses: Swatinem/rust-cache@v2
+
+      - name: Build
+        run: cargo build --release
+
+      - name: Assemble Boot Kit Essencial
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          ./target/release/ps2-manager bootkit out | tee bootkit-report.txt
+
+      - name: Package (zip + sha256)
+        run: |
+          STAMP=$(date -u +%Y%m%d)
+          zip -r "BOOT_MC-essentials-${STAMP}.zip" out/BOOT_MC
+          sha256sum "BOOT_MC-essentials-${STAMP}.zip" > "BOOT_MC-essentials-${STAMP}.zip.sha256"
+
+      - name: Job summary
+        run: |
+          {
+            echo "## Boot Kit Essencial PS2 (PT-BR)"
+            echo ""
+            echo '```'
+            cat bootkit-report.txt
+            echo '```'
+            echo ""
+            echo "Fontes e regras: docs/BOOT_KIT.md"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: BOOT_MC-essentials
+          path: |
+            BOOT_MC-essentials-*.zip
+            BOOT_MC-essentials-*.zip.sha256
+          if-no-files-found: error
+          retention-days: 14

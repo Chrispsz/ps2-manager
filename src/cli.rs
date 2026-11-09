@@ -1,6 +1,6 @@
 //! CLI — definição dos subcomandos e execução.
 
-use crate::deploy::fmcb;
+use crate::deploy::{bootkit, fmcb};
 use crate::deploy::github::GitHubClient;
 use crate::iso::{parser, shrink, zso};
 use crate::opl::{cfg, library, ulcfg};
@@ -98,6 +98,30 @@ pub enum Commands {
         #[arg(long, default_value = "Chrispsz/OPL-Mod-PTBR")]
         repo: String,
         /// apenas lista releases disponíveis
+        #[arg(long)]
+        list: bool,
+    },
+    /// Boot Kit Essencial: OPL-Mod-PTBR + wLaunchELF_ISR + PS2BBL + MCA em /BOOT_MC/
+    Bootkit {
+        /// raiz onde criar BOOT_MC/
+        #[arg(default_value = ".")]
+        dest: PathBuf,
+        /// manifest TOML alternativo (padrão: embutido no binário)
+        #[arg(long)]
+        manifest: Option<PathBuf>,
+        /// sobrescreve arquivos existentes no destino
+        #[arg(long)]
+        overwrite: bool,
+        /// não incluir OPL-Mod-PTBR
+        #[arg(long)]
+        no_opl: bool,
+        /// não incluir wLaunchELF_ISR
+        #[arg(long)]
+        no_wlaunchelf: bool,
+        /// não incluir FREMCB.CNF / CONFIG.INI
+        #[arg(long)]
+        no_configs: bool,
+        /// lista os assets do manifest e sai
         #[arg(long)]
         list: bool,
     },
@@ -325,6 +349,65 @@ pub async fn run(cmd: Commands, token: Option<String>) -> anyhow::Result<()> {
                 }
                 println!("\nCopie via uLaunchELF — instruções em BOOT_MC/README-INSTALACAO.txt");
             }
+        }
+        Commands::Bootkit { dest, manifest, overwrite, no_opl, no_wlaunchelf, no_configs, list } => {
+            let mut m = match &manifest {
+                Some(p) => bootkit::load_manifest(p)?,
+                None => bootkit::default_manifest()?,
+            };
+            bootkit::apply_flags(&mut m, !no_opl, !no_wlaunchelf, !no_configs);
+            if list {
+                println!("Kit : {} (spec {})", m.meta.kit_name, m.meta.spec);
+                for a in &m.assets {
+                    println!(
+                        "• {:<20} {:<30} {:<5} {}",
+                        a.id,
+                        a.target,
+                        if a.enabled { "[ON]" } else { "[off]" },
+                        bootkit::source_desc(&a.source)
+                    );
+                    if !a.description.is_empty() {
+                        println!("  {:<58} {}", "", a.description);
+                    }
+                }
+                return Ok(());
+            }
+            let client = GitHubClient::new(token)?;
+            let counter = Arc::new(AtomicU64::new(0));
+            let ticker = attach_ticker(counter.clone(), 0, "Boot Kit");
+            println!("boot kit: montando /BOOT_MC/ em {}…", dest.display());
+            let rep = bootkit::assemble(&dest, &m, &client, counter, overwrite).await?;
+            ticker.abort();
+            eprintln!();
+            for a in &rep.assets {
+                match &a.status {
+                    bootkit::AssetStatus::Ok { bytes, sha256, source } => {
+                        println!(
+                            "✓ {:<30} {:>9}  sha256:{}…  [{}]",
+                            a.target,
+                            fmt_size(*bytes),
+                            &sha256[..8],
+                            source
+                        );
+                    }
+                    bootkit::AssetStatus::Skipped(w) => {
+                        println!("⊘ {:<30} ({w})", a.target);
+                    }
+                    bootkit::AssetStatus::Failed(err) => {
+                        println!("✗ {:<30}: {err}", a.target);
+                    }
+                }
+            }
+            let ok = rep
+                .assets
+                .iter()
+                .filter(|a| matches!(a.status, bootkit::AssetStatus::Ok { .. }))
+                .count();
+            println!(
+                "\n✓ Boot Kit: {ok} arquivos, {} em {}",
+                fmt_size(rep.total_bytes),
+                rep.dest.display()
+            );
         }
         Commands::Tui { dir } => {
             tui::run_tui(dir).await?;

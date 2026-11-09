@@ -79,6 +79,13 @@ impl GitHubClient {
         resp.error_for_status()?.json().await.map_err(Ps2Error::Http)
     }
 
+    /// Release por tag exata (inclui prereleases).
+    pub async fn tag_release(&self, repo: &str, tag: &str) -> Result<GhRelease> {
+        let url = self.api(&format!("/repos/{repo}/releases/tags/{tag}"));
+        let resp = self.http.get(&url).send().await?;
+        resp.error_for_status()?.json().await.map_err(Ps2Error::Http)
+    }
+
     /// Download com streaming + progresso em bytes.
     pub async fn download(
         &self,
