@@ -5,8 +5,8 @@
 //!      `covers/default/{ID}.jpg` e `covers/3d/{ID}.png`
 //!      — ID convertido `SLUS_214.44` → `SLUS-21444`
 //!   2. GameTDB por região (fallback)
-//! O OPL só faz probe de `.png` para arte descoberta (`textures.c:552-571`),
-//! e valida no máximo 1024×1024 — 140×200 (convenção OPL) cabe de sobra.
+//!      O OPL só faz probe de `.png` para arte descoberta (`textures.c:552-571`),
+//!      e valida no máximo 1024×1024 — 140×200 (convenção OPL) cabe de sobra.
 
 use crate::error::Result;
 use crate::opl::library::GameEntry;

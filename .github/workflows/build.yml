@@ -3,6 +3,7 @@ name: Build ps2-manager
 on:
   push:
     branches: [main]
+    tags: ['v*']
   pull_request:
     branches: [main]
   workflow_dispatch:
@@ -86,3 +87,29 @@ jobs:
             build/ps2-manager-x86_64.AppImage
             build/ps2-manager-x86_64.AppImage.sha256
           if-no-files-found: error
+
+  release:
+    name: Release (tag v*)
+    needs: [build-linux, appimage]
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download artifacts (binário + AppImage)
+        uses: actions/download-artifact@v4
+        with:
+          pattern: ps2-manager-*
+          merge-multiple: true
+          path: release-assets
+
+      - name: Publish release (assets anexados)
+        uses: softprops/action-gh-release@v2
+        with:
+          generate_release_notes: true
+          fail_on_unmatched_files: true
+          files: |
+            release-assets/*.tar.gz
+            release-assets/*.tar.gz.sha256
+            release-assets/*.AppImage
+            release-assets/*.AppImage.sha256

@@ -23,6 +23,7 @@ Substitui USBUtil, HDL Dump e OPL Manager (via Wine) com uma suíte 100% Rust �
 | **VMC** | `vmc list` / `vmc export` | Lê superblock genvmc (384 B), caminha FAT e lista saves; exportação `.psu` (experimental) |
 | **Deploy PT-BR** | `deploy` | Baixa o `OPL-PTBR-Mod-Kit-*.zip` da release mais recente (incl. prereleases) e gera `BOOT_MC/{OPL,BOOT,APPS,SYS-CONF}` com instruções |
 | **Boot Kit Essencial** | `bootkit` | Monta `/BOOT_MC/` com os ELFs mais atuais da cena: OPL-Mod-PTBR + **wLaunchELF_ISR** (exFAT/MX4SIO) + **PS2BBL** + **Memory Card Annihilator**, com SHA256 e fonte de cada asset ([detalhes](docs/BOOT_KIT.md)) |
+| **Biblioteca da Cena** | `biblioteca` | Acervo **opcional** em `/BIBLIOTECA/` na mídia: OPL upstream (testes), wLaunchELF p/ cartões 2-em-1 (SD2PSX/MemCard PRO2), OpenTuna (Slims finais/BIOS 2.30) — o MC fica enxuto: copie só o que usar (guia em `LEIA-ME.txt`) |
 | **TUI** | `tui` | Dashboard Ratatui com **mouse** (clique em abas/toggles/botões, scroll nas listas): `[F1] Biblioteca · [F2] Instalar (navegador de ISOs + staging) · [F3] Boot Kit · [F4] Capas/Cheats · [F5] Ajuda`, seletor de mídia `[F6]`, wizard de primeiro uso, progresso por fases com ETA/MB/s |
 | **AppImage 1-clique (MP6)** | `dist/` | `AppRun` detecta o emulador de terminal do desktop (Alacritty/Kitty/Foot/Konsole/GNOME…) e abre a TUI automaticamente com 2 cliques — zero comandos, zero flags. CI gera `ps2-manager-x86_64.AppImage` |
 
@@ -120,6 +121,7 @@ src/
 
 - [x] v0.1 — parser ISO9660, ZSO, shrink, ul.cfg, deploy PT-BR, capas, cheats, TUI
 - [x] MP5 — Boot Kit Essencial (`bootkit`, manifest embutido, CI semanal)
+- [x] MP5 — Biblioteca da Cena (`biblioteca`, acervo opcional em `/BIBLIOTECA/`)
 - [x] MP6/7 — TUI com mouse/abas/modais/wizard, AppImage 1-clique, seletor
       anti-desastre de mídias, pipeline de staging em SSD + fallocate + rollback
 - [ ] v0.2 — import PSU, validação de fragmentação real (FIEMAP), scrapping de ícones `_ICO`

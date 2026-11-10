@@ -1,0 +1,55 @@
+# Biblioteca da Cena PS2 — manifest de assets (Mega Prompt 5, camada EXTRAS)
+#
+# Filosofia "Controle Manual Assistido":
+#   * O KIT ESSENCIAL (bootkit.toml) vai para /BOOT_MC/ → memory card, enxuto.
+#   * A BIBLIOTECA vai para /BIBLIOTECA/ na MÍDIA (pendrive/microSD) e fica lá:
+#     o memory card tem poucos MB — copie ao MC só o que você usar de verdade.
+#
+# Seleção curada da Pesquisa 2026 (docs/PESQUISA-2026-PS2-TOOLING.md):
+#   * Zero redundância: cheats/GSM/widescreen já vivem DENTRO do OPL;
+#     MCA já está no Kit Essencial; FHDB é só-Fat (público é Slim).
+#   * Só assets com release oficial confirmada (hash SHA256 auditado no deploy).
+#   * Picks sem release automatizável (FreeMcTuna, FreeDVDBoot) ficam
+#     documentados no LEIA-ME.txt gerado — não entram como download.
+#
+# Para customizar: copie este arquivo e rode
+#   ps2-manager biblioteca --manifest /caminho/library.toml
+
+[meta]
+kit_name = "Biblioteca da Cena PS2 (EXTRAS)"
+spec = "megaprompt5 biblioteca rev1"
+
+[[assets]]
+id = "opl_upstream"
+target = "OPL-UPSTREAM/OPNPS2LD.ELF"
+description = "OPL oficial upstream (inglês, build 'latest') — testar recursos novos antes de chegarem ao Mod PT-BR"
+enabled = true
+
+[assets.source]
+kind = "github_release"
+repo = "ps2homebrew/Open-PS2-Loader"
+tag = "latest"
+asset = "OPNPS2LD.ELF"
+
+[[assets]]
+id = "wlaunchelf_mmce"
+target = "WLAUNCHELF-CARTOES-2EM1/WLAUNCHELF-MMCE-XFROM.ELF"
+description = "wLaunchELF_ISR variante MMCE/XFROM — para SD2PSX e MemCard PRO2 (cartões 2-em-1)"
+enabled = true
+
+[assets.source]
+kind = "github_release"
+repo = "israpps/wLaunchELF_ISR"
+asset = "BOOT-EXFAT-MMCE-XFROM.ELF"
+
+[[assets]]
+id = "opentuna_installer"
+target = "OPENTUNA/PS2BBL_OpenTuna_Installer.7z"
+description = "OpenTuna Installer (PS2BBL @ tag 'opentuna') — caminho de boot para os últimos Slims (BIOS 2.30, via Fortuna); extraia na mídia e leia as instruções"
+enabled = true
+
+[assets.source]
+kind = "github_raw"
+repo = "israpps/PlayStation2-Basic-BootLoader"
+tag = "opentuna"
+asset = "PS2BBL_OpenTuna_Installer.7z"

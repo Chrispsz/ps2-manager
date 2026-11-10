@@ -121,9 +121,10 @@ impl Vmc {
                 .map_err(Ps2Error::Io)?;
             let mut fb = vec![0u8; fat_bytes.min(32 * 1024 * 1024)];
             file.read_exact(&mut fb).map_err(Ps2Error::Io)?;
-            fat = fb
-                .chunks_exact(4)
-                .map(|c| u32::from_le_bytes([c[0], c[1], c[2], c[3]]))
+            let (fat_chunks, _rest) = fb.as_chunks::<4>();
+            fat = fat_chunks
+                .iter()
+                .map(|c| u32::from_le_bytes(*c))
                 .collect();
         }
         Ok(Self {
@@ -277,7 +278,7 @@ impl Vmc {
                 out.extend_from_slice(&data[..n]);
                 // alinha stream a 1024 bytes
                 let pad = (1024 - (out.len() % 1024)) % 1024;
-                out.extend(std::iter::repeat(0u8).take(pad));
+                out.extend(std::iter::repeat_n(0u8, pad));
             }
         }
         std::fs::write(out_path, &out).map_err(Ps2Error::Io)?;

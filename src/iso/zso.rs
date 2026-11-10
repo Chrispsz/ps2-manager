@@ -182,7 +182,7 @@ pub fn compress_iso(
     let align: u8 = (total >> 31) as u8;
     let unit: u64 = 1 << align;
     let index_bytes = HEADER_SIZE + (nblocks + 1) * 4;
-    let data_start = (index_bytes + unit - 1) / unit * unit;
+    let data_start = index_bytes.div_ceil(unit) * unit;
 
     let hdr = ZsoHeader { total_bytes: total, block_size: DEFAULT_BLOCK, align };
     let mut fout = BufWriter::new(File::create(output).map_err(Ps2Error::Io)?);
@@ -266,9 +266,10 @@ pub fn decompress_zso(
     let mut idx_bytes = vec![0u8; ((nblocks + 1) * 4) as usize];
     file.seek(SeekFrom::Start(HEADER_SIZE)).map_err(Ps2Error::Io)?;
     file.read_exact(&mut idx_bytes).map_err(Ps2Error::Io)?;
-    let idx: Vec<u32> = idx_bytes
-        .chunks_exact(4)
-        .map(|c| u32::from_le_bytes([c[0], c[1], c[2], c[3]]))
+    let (idx_chunks, _rest) = idx_bytes.as_chunks::<4>();
+    let idx: Vec<u32> = idx_chunks
+        .iter()
+        .map(|c| u32::from_le_bytes(*c))
         .collect();
 
     let unit = 1u64 << hdr.align;

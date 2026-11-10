@@ -76,8 +76,8 @@ impl Browser {
                     _ => {}
                 }
             }
-            dirs.sort_by(|a, b| a.to_lowercase().cmp(&b.to_lowercase()));
-            files.sort_by(|a, b| a.0.to_lowercase().cmp(&b.0.to_lowercase()));
+            dirs.sort_by_key(|a| a.to_lowercase());
+            files.sort_by_key(|a| a.0.to_lowercase());
             self.entries.push(BrowserEntry::Dir("..".into()));
             self.entries
                 .extend(dirs.into_iter().map(BrowserEntry::Dir));

@@ -121,6 +121,7 @@ struct BkOpts {
     include_opl: bool,
     include_wle: bool,
     include_configs: bool,
+    include_library: bool,
     overwrite: bool,
 }
 
@@ -130,6 +131,7 @@ impl Default for BkOpts {
             include_opl: true,
             include_wle: true,
             include_configs: false,
+            include_library: true,
             overwrite: false,
         }
     }
@@ -498,7 +500,7 @@ impl App {
                             }
                         }
                     });
-                    match crate::deploy::bootkit::assemble(&root, &manifest, &client, counter, opts.overwrite).await {
+                    match crate::deploy::bootkit::assemble(&root, &manifest, &client, counter.clone(), opts.overwrite).await {
                         Ok(rep) => {
                             for a in &rep.assets {
                                 let line = match &a.status {
@@ -516,6 +518,41 @@ impl App {
                             }
                             let ok = rep.assets.iter().filter(|a| matches!(a.status, crate::deploy::bootkit::AssetStatus::Ok { .. })).count();
                             let _ = tx2.send(UiMsg::Log(format!("✓ {}: {ok} arquivos em {}", rep.kit_name, rep.dest.display())));
+
+                            // Biblioteca da Cena (acervo opcional em /BIBLIOTECA/)
+                            if opts.include_library {
+                                let _ = tx2.send(UiMsg::Log("biblioteca: resolvendo releases do acervo…".into()));
+                                match crate::deploy::bootkit::default_library() {
+                                    Ok(lib) => {
+                                        match crate::deploy::bootkit::assemble_kind(&root, crate::deploy::bootkit::KitKind::Library, &lib, &client, counter, opts.overwrite).await {
+                                            Ok(lrep) => {
+                                                for a in &lrep.assets {
+                                                    let line = match &a.status {
+                                                        crate::deploy::bootkit::AssetStatus::Ok { bytes, .. } => {
+                                                            format!("✓ {} ({})", a.target, crate::cli::fmt_size(*bytes))
+                                                        }
+                                                        crate::deploy::bootkit::AssetStatus::Skipped(w) => {
+                                                            format!("⊘ {} ({w})", a.target)
+                                                        }
+                                                        crate::deploy::bootkit::AssetStatus::Failed(m) => {
+                                                            format!("✗ {}: {m}", a.target)
+                                                        }
+                                                    };
+                                                    let _ = tx2.send(UiMsg::Log(line));
+                                                }
+                                                let okl = lrep.assets.iter().filter(|a| matches!(a.status, crate::deploy::bootkit::AssetStatus::Ok { .. })).count();
+                                                let _ = tx2.send(UiMsg::Log(format!("✓ Biblioteca: {okl} arquivos em {} — guia em LEIA-ME.txt", lrep.dest.display())));
+                                            }
+                                            Err(e) => {
+                                                let _ = tx2.send(UiMsg::Log(format!("✗ biblioteca falhou: {e}")));
+                                            }
+                                        }
+                                    }
+                                    Err(e) => {
+                                        let _ = tx2.send(UiMsg::Log(format!("✗ biblioteca: manifest: {e}")));
+                                    }
+                                }
+                            }
                         }
                         Err(e) => {
                             let _ = tx2.send(UiMsg::Log(format!("✗ boot kit falhou: {e}")));
@@ -733,6 +770,7 @@ impl App {
             0 => self.bk_opts.include_opl = !self.bk_opts.include_opl,
             1 => self.bk_opts.include_wle = !self.bk_opts.include_wle,
             2 => self.bk_opts.include_configs = !self.bk_opts.include_configs,
+            3 => self.bk_opts.include_library = !self.bk_opts.include_library,
             _ => self.bk_opts.overwrite = !self.bk_opts.overwrite,
         }
     }
@@ -871,15 +909,13 @@ impl App {
                     KeyCode::Char('z') => self.toggle_install_opt(0),
                     KeyCode::Char('x') => self.toggle_install_opt(1),
                     KeyCode::Char('f') => self.toggle_install_opt(2),
-                    KeyCode::Char('g') => {
-                        if self.browser.selected_file().is_some() {
-                            self.modal = Modal::ConfirmInstall;
-                        }
+                    KeyCode::Char('g') if self.browser.selected_file().is_some() => {
+                        self.modal = Modal::ConfirmInstall;
                     }
                     _ => {}
                 },
                 Tab::BootKit => match code {
-                    KeyCode::Down | KeyCode::Char('j') => self.bk_sel = (self.bk_sel + 1).min(3),
+                    KeyCode::Down | KeyCode::Char('j') => self.bk_sel = (self.bk_sel + 1).min(4),
                     KeyCode::Up | KeyCode::Char('k') => self.bk_sel = self.bk_sel.saturating_sub(1),
                     KeyCode::Char(' ') => self.toggle_bk(),
                     KeyCode::Enter => self.run_bootkit(tx),
@@ -971,7 +1007,7 @@ impl App {
                 }
             }
             Hit::BkRow(i) => {
-                self.bk_sel = i.min(3);
+                self.bk_sel = i.min(4);
                 self.toggle_bk();
             }
             Hit::BkGo => self.run_bootkit(tx),
@@ -1019,7 +1055,7 @@ impl App {
                     let b = &mut self.browser;
                     move_sel(&mut b.selected, b.entries.len(), delta);
                 }
-                Tab::BootKit => move_sel(&mut self.bk_sel, 4, delta),
+                Tab::BootKit => move_sel(&mut self.bk_sel, 5, delta),
                 Tab::Extras => move_sel(&mut self.extras_sel, 4, delta),
                 Tab::Help => {}
             },
@@ -1406,11 +1442,12 @@ fn render_install(f: &mut ratatui::Frame, area: Rect, app: &mut App) {
 fn render_bootkit(f: &mut ratatui::Frame, area: Rect, app: &mut App) {
     let inner_area = area;
     let o = app.bk_opts;
-    let opts: [(usize, bool, &str); 4] = [
+    let opts: [(usize, bool, &str); 5] = [
         (0, o.include_opl, "Incluir OPL-Mod-PTBR (compilação recente)"),
         (1, o.include_wle, "Incluir wLaunchELF_ISR (exFAT/BDM/MX4SIO)"),
         (2, o.include_configs, "Incluir atalhos no FREMCB.CNF / CONFIG.INI"),
-        (3, o.overwrite, "Sobrescrever configurações existentes na mídia"),
+        (3, o.include_library, "Baixar Biblioteca da Cena (EXTRAS → /BIBLIOTECA)"),
+        (4, o.overwrite, "Sobrescrever configurações existentes na mídia"),
     ];
     let mut lines: Vec<Line> = Vec::new();
     lines.push(Line::from(format!(" Kit    : {}", app.bk_kit.0)));
@@ -1445,6 +1482,12 @@ fn render_bootkit(f: &mut ratatui::Frame, area: Rect, app: &mut App) {
         " Destino: {}/BOOT_MC",
         trunc(&app.root.display().to_string(), 40)
     )));
+    if o.include_library {
+        lines.push(Line::from(format!(
+            "          + {}/BIBLIOTECA (acervo opcional)",
+            trunc(&app.root.display().to_string(), 40)
+        )));
+    }
     lines.push(Line::from(""));
     lines.push(Line::from(Span::styled(
         " [ESPAÇO] alterna · [ENTER] gerar kit · progresso no rodapé",
@@ -1458,14 +1501,14 @@ fn render_bootkit(f: &mut ratatui::Frame, area: Rect, app: &mut App) {
     );
     let inner = modals::inner_rect(inner_area);
     f.render_widget(p, inner_area);
-    for i in 0..4 {
+    for i in 0..5 {
         app.hits.push((
             Rect { x: inner.x, y: inner.y + 4 + i as u16, width: inner.width, height: 1 },
             Hit::BkRow(i),
         ));
     }
     app.hits.push((
-        Rect { x: inner.x, y: inner.y + 11, width: inner.width, height: 1 },
+        Rect { x: inner.x, y: inner.y + 12, width: inner.width, height: 1 },
         Hit::BkGo,
     ));
 }

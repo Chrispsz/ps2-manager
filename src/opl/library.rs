@@ -110,7 +110,7 @@ fn frag_status(meta: &fs::Metadata) -> String {
     #[cfg(unix)]
     {
         use std::os::unix::fs::MetadataExt;
-        let blocks = meta.blocks() as u64 * 512;
+        let blocks = meta.blocks() * 512;
         if meta.len() == 0 || blocks >= meta.len() * 99 / 100 {
             "Sequencial ✓".into()
         } else {

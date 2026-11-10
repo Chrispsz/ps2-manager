@@ -28,22 +28,32 @@ jobs:
         run: |
           ./target/release/ps2-manager bootkit out | tee bootkit-report.txt
 
+      - name: Validate Biblioteca da Cena (fontes do acervo)
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          ./target/release/ps2-manager biblioteca out | tee biblioteca-report.txt
+          test -f out/BIBLIOTECA/LEIA-ME.txt
+
       - name: Package (zip + sha256)
         run: |
           STAMP=$(date -u +%Y%m%d)
           zip -r "BOOT_MC-essentials-${STAMP}.zip" out/BOOT_MC
           sha256sum "BOOT_MC-essentials-${STAMP}.zip" > "BOOT_MC-essentials-${STAMP}.zip.sha256"
+          zip -r "BIBLIOTECA-cena-${STAMP}.zip" out/BIBLIOTECA
+          sha256sum "BIBLIOTECA-cena-${STAMP}.zip" > "BIBLIOTECA-cena-${STAMP}.zip.sha256"
 
       - name: Job summary
         run: |
           {
-            echo "## Boot Kit Essencial PS2 (PT-BR)"
+            echo "## Boot Kit Essencial PS2 (PT-BR) + Biblioteca da Cena"
             echo ""
             echo '```'
             cat bootkit-report.txt
+            cat biblioteca-report.txt
             echo '```'
             echo ""
-            echo "Fontes e regras: docs/BOOT_KIT.md"
+            echo "Fontes e regras: docs/BOOT_KIT.md · acervo: library.toml"
           } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Upload artifact
@@ -53,5 +63,7 @@ jobs:
           path: |
             BOOT_MC-essentials-*.zip
             BOOT_MC-essentials-*.zip.sha256
+            BIBLIOTECA-cena-*.zip
+            BIBLIOTECA-cena-*.zip.sha256
           if-no-files-found: error
           retention-days: 14

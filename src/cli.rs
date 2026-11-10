@@ -130,6 +130,21 @@ pub enum Commands {
         #[arg(long)]
         list: bool,
     },
+    /// Biblioteca da Cena: acervo opcional em /BIBLIOTECA/ (copie ao MC só o que usar)
+    Biblioteca {
+        /// raiz da mídia onde criar BIBLIOTECA/
+        #[arg(default_value = ".")]
+        dest: PathBuf,
+        /// manifest TOML alternativo (padrão: embutido no binário)
+        #[arg(long)]
+        manifest: Option<PathBuf>,
+        /// sobrescreve arquivos existentes no destino
+        #[arg(long)]
+        overwrite: bool,
+        /// lista os assets do acervo e sai
+        #[arg(long)]
+        list: bool,
+    },
     /// Lista mídias externas SEGURAS (discos internos do PC nunca aparecem)
     Devices {},
     /// Dashboard interativo (Ratatui TUI, mouse + abas)
@@ -212,8 +227,8 @@ pub async fn run(cmd: Commands, token: Option<String>) -> anyhow::Result<()> {
         Commands::Scan { dir } => {
             let games = library::scan_library(&dir)?;
             println!(
-                "{:<12} {:<36} {:>9}  {:<4} {:<5} {}",
-                "GAME ID", "TÍTULO", "TAMANHO", "FMT", "MÍDIA", "FRAG"
+                "{:<12} {:<36} {:>9}  {:<4} {:<5} FRAG",
+                "GAME ID", "TÍTULO", "TAMANHO", "FMT", "MÍDIA"
             );
             for g in &games {
                 println!(
@@ -474,6 +489,66 @@ pub async fn run(cmd: Commands, token: Option<String>) -> anyhow::Result<()> {
                 fmt_size(rep.total_bytes),
                 rep.dest.display()
             );
+        }
+        Commands::Biblioteca { dest, manifest, overwrite, list } => {
+            let m = match &manifest {
+                Some(p) => bootkit::load_manifest(p)?,
+                None => bootkit::default_library()?,
+            };
+            if list {
+                println!("Acervo: {} (spec {})", m.meta.kit_name, m.meta.spec);
+                for a in &m.assets {
+                    println!(
+                        "• {:<20} {:<42} {:<5} {}",
+                        a.id,
+                        a.target,
+                        if a.enabled { "[ON]" } else { "[off]" },
+                        bootkit::source_desc(&a.source)
+                    );
+                    if !a.description.is_empty() {
+                        println!("  {:<58} {}", "", a.description);
+                    }
+                }
+                return Ok(());
+            }
+            let client = GitHubClient::new(token)?;
+            let counter = Arc::new(AtomicU64::new(0));
+            let ticker = attach_ticker(counter.clone(), 0, "Biblioteca");
+            println!("biblioteca: montando /BIBLIOTECA/ em {}…", dest.display());
+            let rep =
+                bootkit::assemble_kind(&dest, bootkit::KitKind::Library, &m, &client, counter, overwrite).await?;
+            ticker.abort();
+            eprintln!();
+            for a in &rep.assets {
+                match &a.status {
+                    bootkit::AssetStatus::Ok { bytes, sha256, source } => {
+                        println!(
+                            "✓ {:<42} {:>9}  sha256:{}…  [{}]",
+                            a.target,
+                            fmt_size(*bytes),
+                            &sha256[..8],
+                            source
+                        );
+                    }
+                    bootkit::AssetStatus::Skipped(w) => {
+                        println!("⊘ {:<42} ({w})", a.target);
+                    }
+                    bootkit::AssetStatus::Failed(err) => {
+                        println!("✗ {:<42}: {err}", a.target);
+                    }
+                }
+            }
+            let ok = rep
+                .assets
+                .iter()
+                .filter(|a| matches!(a.status, bootkit::AssetStatus::Ok { .. }))
+                .count();
+            println!(
+                "\n✓ Biblioteca: {ok} arquivos, {} em {}",
+                fmt_size(rep.total_bytes),
+                rep.dest.display()
+            );
+            println!("  guia completo em BIBLIOTECA/LEIA-ME.txt");
         }
         Commands::Devices {} => {
             let devs = storage::scan_target_devices();

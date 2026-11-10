@@ -1,14 +1,22 @@
 //! Boot Kit Essencial — pesquisa, download, validação (SHA256) e montagem
 //! da pasta `/BOOT_MC/` com os ELFs mais atuais da cena PS2 (Mega Prompt 5).
 //!
+//! Duas camadas de conteúdo:
+//!   * KIT ESSENCIAL (`KitKind::Boot`): `/BOOT_MC/` — cadeia de boot para o
+//!     memory card (enxuto, manifest `bootkit.toml` embutido).
+//!   * BIBLIOTECA (`KitKind::Library`): `/BIBLIOTECA/` — acervo opcional na
+//!     mídia; copie ao MC só o que usar (manifest `library.toml` embutido).
+//!
 //! Fontes (releases oficiais, incluindo builds automáticos):
 //!   - OPL:            `Chrispsz/OPL-Mod-PTBR` (Mod-Kit zip → OPNPS2LD.ELF)
+//!   - OPL upstream:   `ps2homebrew/Open-PS2-Loader` (build "latest")
 //!   - wLaunchELF:     `israpps/wLaunchELF_ISR` (BOOT-EXFAT-MX4SIO.ELF)
 //!   - Memory Annih.:  `ffgriever-pl/Memory-Card-Annihilator` (mca-packed.elf)
 //!   - PS2BBL:         `israpps/PlayStation2-Basic-BootLoader` (COMPRESSED + INI)
-//!   - GSM:            slot opcional (sem release estável no GitHub hoje)
+//!   - OpenTuna:       idem @ tag `opentuna` (caminho Fortuna p/ Slims finais)
+//!   - GSM:            integrado ao OPL per-game (não é ELF separado hoje)
 //!
-//! O manifest padrão é embutido no binário (`bootkit.toml`) e pode ser
+//! O manifest padrão é embutido no binário (`include_str!`) e pode ser
 //! substituído por `--manifest <arquivo>` no CLI.
 
 use crate::deploy::github::{GhAsset, GhRelease, GitHubClient, DEFAULT_REPO};
@@ -20,8 +28,36 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 
-/// Manifest padrão embutido no binário.
+/// Manifest padrão do Kit Essencial (memory card).
 pub const MANIFEST_TOML: &str = include_str!("../../bootkit.toml");
+
+/// Manifest padrão da Biblioteca da Cena (acervo opcional na mídia).
+pub const LIBRARY_TOML: &str = include_str!("../../library.toml");
+
+/// Camada de deploy do kit — controla subdir e arquivo de auditoria.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum KitKind {
+    /// `/BOOT_MC/` — cadeia de boot transportada para o memory card.
+    Boot,
+    /// `/BIBLIOTECA/` — acervo opcional que permanece na mídia.
+    Library,
+}
+
+impl KitKind {
+    pub fn subdir(self) -> &'static str {
+        match self {
+            Self::Boot => "BOOT_MC",
+            Self::Library => "BIBLIOTECA",
+        }
+    }
+
+    pub fn info_file(self) -> &'static str {
+        match self {
+            Self::Boot => "BOOT-KIT-INFO.txt",
+            Self::Library => "LEIA-ME.txt",
+        }
+    }
+}
 
 #[derive(Debug, Deserialize)]
 pub struct KitManifest {
@@ -79,6 +115,15 @@ pub enum AssetSource {
     OplPtbrKit { inner: String },
     #[serde(rename = "builtin")]
     Builtin { template: String },
+    /// Baixa o asset da release **sem extrair** (arquivo cru — usado pela
+    /// Biblioteca para preservar instaladores multi-arquivo, ex.: OpenTuna).
+    #[serde(rename = "github_raw")]
+    GithubRaw {
+        repo: String,
+        #[serde(default)]
+        tag: Option<String>,
+        asset: String,
+    },
 }
 
 #[derive(Debug)]
@@ -114,6 +159,10 @@ pub fn default_manifest() -> Result<KitManifest> {
     parse_manifest(MANIFEST_TOML)
 }
 
+pub fn default_library() -> Result<KitManifest> {
+    parse_manifest(LIBRARY_TOML)
+}
+
 pub fn load_manifest(path: &Path) -> Result<KitManifest> {
     let s = std::fs::read_to_string(path).map_err(Ps2Error::Io)?;
     parse_manifest(&s)
@@ -147,6 +196,10 @@ pub fn source_desc(s: &AssetSource) -> String {
         },
         AssetSource::OplPtbrKit { inner } => format!("{DEFAULT_REPO} :: Mod-Kit.zip → {inner}"),
         AssetSource::Builtin { .. } => "template embutido do PS2 Manager".into(),
+        AssetSource::GithubRaw { repo, tag, asset } => match tag {
+            Some(t) => format!("{repo}@{t} :: {asset} (cru)") ,
+            None => format!("{repo} :: {asset} (cru)"),
+        },
     }
 }
 
@@ -322,22 +375,49 @@ async fn resolve_asset(
             template.clone().into_bytes(),
             "template embutido do PS2 Manager".into(),
         )),
+        AssetSource::GithubRaw { repo, tag, asset: pattern } => {
+            let rel = fetch_release(client, cache, repo, tag.as_deref()).await?;
+            let a = find_asset(&rel, pattern).ok_or_else(|| {
+                Ps2Error::Other(format!("{repo}@{}: asset '{pattern}' não encontrado", rel.tag_name))
+            })?;
+            let path = download_to(client, &a.browser_download_url, tmp, &a.name, progress).await?;
+            let bytes = std::fs::read(&path).map_err(Ps2Error::Io)?;
+            Ok((bytes, format!("{repo}@{} :: {} (cru)", rel.tag_name, a.name)))
+        }
     }
 }
 
 fn write_kit_info(
     dest_root: &Path,
+    kind: KitKind,
     manifest: &KitManifest,
     assets: &[AssetReport],
     total: u64,
 ) -> std::io::Result<()> {
-    let dir = dest_root.join("BOOT_MC");
+    let dir = dest_root.join(kind.subdir());
     std::fs::create_dir_all(&dir)?;
     let secs = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_secs())
         .unwrap_or_default();
     let mut s = String::new();
+    if kind == KitKind::Library {
+        s.push_str(
+            "BIBLIOTECA DA CENA PS2 — como usar\n\
+             ===================================\n\
+             Este acervo OPCIONAL fica na mídia (não vai para o MC).\n\
+             O memory card tem poucos MB: copie para mc0:/APPS/ apenas o\n\
+             que você usar de verdade (wLaunchELF: mass:/BIBLIOTECA/…).\n\n\
+             Pastas:\n\
+             • OPL-UPSTREAM/  OPL oficial (inglês) — testar recursos novos.\n\
+             • WLAUNCHELF-CARTOES-2EM1/  variante p/ SD2PSX e MemCard PRO2.\n\
+             • OPENTUNA/      boot p/ Slims finais (BIOS 2.30, via Fortuna).\n\n\
+             Picks manuais (fonte sem release automatizável):\n\
+             • FreeMcTuna    github.com/israpps/FreeMcTuna\n\
+             • FreeDVDBoot   github.com/cturt/FreeDVDBoot (PREBUILT_ISO_FILES)\n\
+             • GSM/cheats/widescreen: já integrados ao OPL (CFG per-game).\n\n\n",
+        );
+    }
     s.push_str(&format!(
         "{} — gerado pelo PS2 Manager (epoch {secs})\n",
         manifest.meta.kit_name
@@ -360,7 +440,7 @@ fn write_kit_info(
             }
         }
     }
-    std::fs::write(dir.join("BOOT-KIT-INFO.txt"), s)
+    std::fs::write(dir.join(kind.info_file()), s)
 }
 
 /// Monta o Boot Kit Essencial em `dest_root/BOOT_MC/` baixando os ELFs
@@ -372,7 +452,23 @@ pub async fn assemble(
     progress: Arc<AtomicU64>,
     overwrite: bool,
 ) -> Result<KitReport> {
-    let tmp = std::env::temp_dir().join(format!("ps2mgr-bk-{}", std::process::id()));
+    assemble_kind(dest_root, KitKind::Boot, manifest, client, progress, overwrite).await
+}
+
+/// Monta qualquer camada de kit (`KitKind`) em `dest_root/<subdir>/`.
+pub async fn assemble_kind(
+    dest_root: &Path,
+    kind: KitKind,
+    manifest: &KitManifest,
+    client: &GitHubClient,
+    progress: Arc<AtomicU64>,
+    overwrite: bool,
+) -> Result<KitReport> {
+    let tmp = std::env::temp_dir().join(format!(
+        "ps2mgr-{}-{}",
+        kind.subdir().to_ascii_lowercase(),
+        std::process::id()
+    ));
     tokio::fs::create_dir_all(&tmp).await.map_err(Ps2Error::Io)?;
     let mut cache: HashMap<String, GhRelease> = HashMap::new();
     let mut out: Vec<AssetReport> = Vec::new();
@@ -385,7 +481,7 @@ pub async fn assemble(
             });
             continue;
         }
-        let target_path = dest_root.join("BOOT_MC").join(&a.target);
+        let target_path = dest_root.join(kind.subdir()).join(&a.target);
         if target_path.exists() && !overwrite {
             out.push(AssetReport {
                 target: a.target.clone(),
@@ -438,14 +534,14 @@ pub async fn assemble(
         .filter(|r| matches!(r.status, AssetStatus::Ok { .. }))
         .count();
     if written > 0 {
-        let _ = write_kit_info(dest_root, manifest, &out, total);
+        let _ = write_kit_info(dest_root, kind, manifest, &out, total);
     }
     let _ = tokio::fs::remove_dir_all(&tmp).await;
     progress.store(0, Ordering::Relaxed);
 
     Ok(KitReport {
         kit_name: manifest.meta.kit_name.clone(),
-        dest: dest_root.join("BOOT_MC"),
+        dest: dest_root.join(kind.subdir()),
         assets: out,
         total_bytes: total,
     })

@@ -75,3 +75,35 @@ ps2-manager bootkit --list              # mostra fontes/variantes do manifest
 # TUI — painel [F3] "Deploy de Boot Essencial"
 #   ↑/↓ navega · ESPAÇO alterna · ENTER gera · F3 fecha
 ```
+
+## 6. Biblioteca da Cena — camada EXTRAS (`library.toml`)
+
+Duas camadas de conteúdo, para o memory card **nunca ficar sujo**:
+
+| Camada | Destino | Manifest | Filosofia |
+|---|---|---|---|
+| **Kit Essencial** | `/BOOT_MC/` (→ MC) | `bootkit.toml` | Enxuto: só a cadeia de boot |
+| **Biblioteca** | `/BIBLIOTECA/` (fica na mídia) | `library.toml` | Acervo opcional — copie ao MC só o que usar |
+
+```bash
+# CLI
+ps2-manager biblioteca /media/$USER/PS2_SD
+ps2-manager biblioteca --list     # fontes do acervo
+```
+
+Conteúdo curado (zero redundância — cheats/GSM/widescreen já vivem no OPL;
+FHDB é só-Fat; MCA já está no Kit):
+
+| Pasta | Asset | Fonte | Por quê |
+|---|---|---|---|
+| `OPL-UPSTREAM/` | `OPNPS2LD.ELF` | `ps2homebrew/Open-PS2-Loader@latest` | OPL oficial (inglês) p/ testar recursos novos antes do Mod PT-BR |
+| `WLAUNCHELF-CARTOES-2EM1/` | `WLAUNCHELF-MMCE-XFROM.ELF` | `israpps/wLaunchELF_ISR@latest` | Variante MMCE/XFROM — SD2PSX e MemCard PRO2 |
+| `OPENTUNA/` | `PS2BBL_OpenTuna_Installer.7z` | `israpps/PlayStation2-Basic-BootLoader@opentuna` (asset cru) | Boot p/ Slims finais (BIOS 2.30, via Fortuna) |
+
+**Picks manuais** (sem release automatizável — documentados no `LEIA-ME.txt`):
+[FreeMcTuna](https://github.com/israpps/FreeMcTuna) e
+[FreeDVDBoot](https://github.com/cturt/FreeDVDBoot) (`PREBUILT_ISO_FILES/`).
+
+- **TUI:** painel [F3] — toggle "Baixar Biblioteca da Cena" (ligado por padrão).
+- **CI:** o pipeline semanal também monta e audita `/BIBLIOTECA/` — se uma
+  fonte do acervo quebrar, o CI fica vermelho junto com o kit.

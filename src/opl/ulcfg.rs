@@ -21,8 +21,8 @@
 //!   1. tabela MSB-first com poly 0x04C11DB7, gravada INVERTIDA (crctab[255-t]);
 //!   2. quando o MSB está setado, NÃO faz XOR (o oposto do CRC-32 padrão);
 //!   3. inclui o byte NUL no cálculo e lê até 33 bytes (32 + 1).
-//! Em C, a leitura avança além do campo name[32] e cai no magic "ul." —
-//! simulado aqui anexando "ul." ao buffer de 32 bytes.
+//!      Em C, a leitura avança além do campo name[32] e cai no magic "ul." —
+//!      simulado aqui anexando "ul." ao buffer de 32 bytes.
 
 use crate::error::Result;
 use std::fs::OpenOptions;
@@ -137,10 +137,8 @@ pub fn read_ulcfg(device_root: &Path) -> Result<Vec<UlRecord>> {
         .map_err(crate::error::Ps2Error::Io)?
         .read_to_end(&mut data)
         .map_err(crate::error::Ps2Error::Io)?;
-    Ok(data
-        .chunks_exact(RECORD_SIZE)
-        .filter_map(UlRecord::from_bytes)
-        .collect())
+    let (recs, _rest) = data.as_chunks::<RECORD_SIZE>();
+    Ok(recs.iter().filter_map(|r| UlRecord::from_bytes(r)).collect())
 }
 
 /// Grava (substitui) o ul.cfg do dispositivo.

@@ -34,7 +34,7 @@ fn norm_value(v: &str) -> Option<u32> {
 fn convert_code(addr: u32, ptype: &str, value: u32) -> Option<RawCode> {
     let base = addr & 0x0FFF_FFFF;
     let (a, v) = match ptype.trim().to_ascii_lowercase().as_str() {
-        "byte" => (0x0000_0000 | base, value & 0xFF),
+        "byte" => (base, value & 0xFF),
         "short" | "word" => (0x1000_0000 | base, value & 0xFFFF),
         "extended" | "dword" => (0x2000_0000 | base, value),
         _ => return None,
