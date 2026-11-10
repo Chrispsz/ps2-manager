@@ -90,7 +90,9 @@ sed -i "0,/^version = \"${CUR}\"/s//version = \"${NEXT}\"/" Cargo.toml
 git add Cargo.toml CHANGELOG.md
 # Cargo.lock pode ser ignorado (política bin-only) — só entra se for rastreado
 git ls-files --error-unmatch Cargo.lock >/dev/null 2>&1 && git add Cargo.lock || true
-git commit -q -m "chore(release): ${NEXT} [skip ci]"
+# sem [skip ci]: o GitHub suprime workflows de TODO push cujo head commit
+# carrega skip — inclusive o push da tag (que é o que dispara o job release)
+git commit -q -m "chore(release): ${NEXT}"
 git tag -a "v${NEXT}" -m "PS2 Manager v${NEXT}"
 
 PUSH_URL="https://x-access-token:${TOKEN}@github.com/Chrispsz/ps2-manager.git"
