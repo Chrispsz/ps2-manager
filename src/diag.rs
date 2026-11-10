@@ -261,7 +261,27 @@ pub async fn run_full(
                 t
             );
         } else {
-            let names: Vec<String> = devs.iter().map(|d| d.display_name()).collect();
+            // exFAT é o padrão moderno (OPL 1.2.0+ lê exFAT em todo BDM);
+            // a classe do FS entra no detalhe para dar visibilidade no
+            // relatório — FAT32 só é relevante como legado (ul.cfg).
+            let names: Vec<String> = devs
+                .iter()
+                .map(|d| {
+                    let fs = d.mounts.first().map(|m| {
+                        match core::storage::FsClass::from_fs(&m.fs_type) {
+                            core::storage::FsClass::Exfat => format!(
+                                ", exFAT — {} livres",
+                                crate::cli::fmt_size(m.free_bytes)
+                            ),
+                            core::storage::FsClass::Fat32 => {
+                                ", FAT32 (legacy · máx 4 GiB)".to_string()
+                            }
+                            other => format!(", {}", other.label()),
+                        }
+                    });
+                    format!("{}{}", d.display_name(), fs.unwrap_or_default())
+                })
+                .collect();
             push!(
                 "Mídias externas",
                 Status::Pass,
