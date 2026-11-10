@@ -1,0 +1,49 @@
+#!/usr/bin/env bash
+# AppRun — Launcher automático em 1 clique para o PS2 Manager (Mega Prompt 6).
+#
+# Dê dois cliques no .AppImage no seu gerenciador de arquivos: o script
+# detecta o ambiente e abre a TUI no emulador de terminal padrão.
+# Executado de dentro de um terminal (`./ps2-manager.AppImage`), roda direto.
+
+HERE="$(dirname "$(readlink -f "${0}")")"
+BINARY="$HERE/usr/bin/ps2-manager"
+
+# Executado de dentro de um terminal ativo → roda diretamente
+if [ -t 0 ]; then
+    exec "$BINARY" "$@"
+    exit 0
+fi
+
+# Emuladores de terminal comuns (Arch, Debian, Fedora, Ubuntu…)
+TERMINALS=(
+    "alacritty -e"
+    "kitty"
+    "foot"
+    "konsole -e"
+    "gnome-terminal --"
+    "xfce4-terminal -e"
+    "terminator -e"
+    "lxterminal -e"
+    "mate-terminal -x"
+    "tilix -e"
+    "wezterm start --"
+    "kitty.sh"
+    "xterm -e"
+)
+
+for TERM_CMD in "${TERMINALS[@]}"; do
+    CMD_NAME=$(echo "$TERM_CMD" | cut -d ' ' -f1)
+    if command -v "$CMD_NAME" >/dev/null 2>&1; then
+        # shellcheck disable=SC2086
+        exec $TERM_CMD "$BINARY" "$@"
+        exit 0
+    fi
+done
+
+# Fallbacks visuais
+if command -v zenity >/dev/null 2>&1; then
+    zenity --error --text="Nenhum terminal compatível encontrado.\nInstale alacritty, kitty, foot, konsole ou gnome-terminal e tente de novo." 2>/dev/null || true
+elif command -v kdialog >/dev/null 2>&1; then
+    kdialog --error "Nenhum terminal compatível encontrado. Instale alacritty/kitty/foot/konsole." 2>/dev/null || true
+fi
+exit 1

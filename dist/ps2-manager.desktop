@@ -1,0 +1,12 @@
+[Desktop Entry]
+Type=Application
+Name=PS2 Manager
+Name[pt_BR]=PS2 Manager
+Comment=Gerenciador de jogos e suíte de deploy para PlayStation 2 (exFAT / ZSO / BDM)
+Comment[pt_BR]=Gerenciador de jogos e suíte de deploy para PlayStation 2 (exFAT / ZSO / BDM)
+Exec=ps2-manager tui
+Icon=ps2-manager
+Terminal=true
+Categories=Game;Utility;FileTools;
+Keywords=ps2;opl;zso;exfat;mx4sio;playstation;iso;
+StartupNotify=false

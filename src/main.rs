@@ -1,14 +1,16 @@
 //! PS2 Manager — gerenciador nativo Linux para coleções PS2/OPL.
 //!
 //! Módulos:
+//!   core/    seletor seguro de mídias (anti-desastre) + staging SSD + pipeline
 //!   iso/     parser ISO9660 mountless + ZSO (LZ4) + Smart Shrink (LBA)
 //!   opl/     estrutura de pastas, naming, ul.cfg (USBExtreme), CFG/GSM
 //!   vmc/     memória virtual .bin (superblock genvmc) + export PSU
 //!   scrape/  capas GameTDB (ART/_COV.png) + PNACH → .cht
-//!   deploy/  GitHub API (OPL-Mod-PTBR) + gerador /BOOT_MC/
-//!   tui/     dashboard Ratatui
+//!   deploy/  GitHub API (OPL-Mod-PTBR) + boot kit /BOOT_MC/
+//!   tui/     dashboard Ratatui (mouse + abas + modais)
 
 mod cli;
+mod core;
 mod deploy;
 mod error;
 mod iso;

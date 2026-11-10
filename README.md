@@ -14,6 +14,8 @@ Substitui USBUtil, HDL Dump e OPL Manager (via Wine) com uma suíte 100% Rust �
 | **ZSO/ZISO** | `zso` / `unzso` | Conversor LZ4 **multithread (rayon)**, binário-compatível com o driver ZSO do OPL (`modules/isofs/zso.c`): blocos de 2048 B, índice em unidades de `2^align`, bit 31 = bloco plain |
 | **Smart Shrink** | `shrink` | Remove setores fantasma (0x00/0xFF) do fim dos arquivos e **realoca os extents reescrevendo PVD, path tables e directory records (LE+BE)** — conteúdo do jogo permanece byte-a-byte idêntico |
 | **Biblioteca OPL** | `install` / `scan` | Estrutura oficial `CD DVD ART CFG VMC CHT APPS THM LNG` (idêntica a `sbCreateFolders`), naming `GAMEID.Título.iso`, relatório de fragmentação |
+| **Pipeline Staged (MP7)** | `install` | **Anti-desastre + staging em SSD**: conversão ZSO no disco do PC (`~/.cache/ps2-manager`) → validação de integridade (header + Game ID) → `fallocate` + streaming I/O na mídia → rollback automático em `.part` (cancelamento nunca deixa arquivo parcial) |
+| **Seletor de Mídias (MP7)** | `devices` / TUI `[F6]` | Lista **apenas** removíveis/USB/SD com montagem (sysfs + `/proc/self/mounts`, **zero libudev**). Discos internos (`/`, `/boot`, `/home`, NVMe, virtio, md/dm/zram) **nunca** aparecem — override de dev: `PS2_MANAGER_ALLOW_INTERNAL=1` |
 | **ul.cfg** | `ulcfg` | Formato USBExtreme de 64 bytes exato (`include/supportbase.h`), com o **CRC32 USBAdvance réplica de `USBA_crc32`** (tabela invertida, XOR invertido, NUL incluso) — validado bit a bit contra o C original; partes `ul.<CRC>.<ID>.<NN>` |
 | **CFG + GSM** | `cfg` | Gera `CFG/<ID>.cfg` com chaves oficiais (`#Name`, `#Media`, `$GSMVMode`…) |
 | **Capas** | `covers` | Baixa da base [xlenore/ps2-covers](https://github.com/xlenore/ps2-covers) (+ GameTDB fallback) e salva `ART/<ID>_COV.png` **140×200** |
@@ -21,7 +23,8 @@ Substitui USBUtil, HDL Dump e OPL Manager (via Wine) com uma suíte 100% Rust �
 | **VMC** | `vmc list` / `vmc export` | Lê superblock genvmc (384 B), caminha FAT e lista saves; exportação `.psu` (experimental) |
 | **Deploy PT-BR** | `deploy` | Baixa o `OPL-PTBR-Mod-Kit-*.zip` da release mais recente (incl. prereleases) e gera `BOOT_MC/{OPL,BOOT,APPS,SYS-CONF}` com instruções |
 | **Boot Kit Essencial** | `bootkit` | Monta `/BOOT_MC/` com os ELFs mais atuais da cena: OPL-Mod-PTBR + **wLaunchELF_ISR** (exFAT/MX4SIO) + **PS2BBL** + **Memory Card Annihilator**, com SHA256 e fonte de cada asset ([detalhes](docs/BOOT_KIT.md)) |
-| **TUI** | `tui` | Dashboard Ratatui: biblioteca, ações rápidas `[C]ZSO [A]capas [D]deploy [F3]boot kit`, barra de progresso e log |
+| **TUI** | `tui` | Dashboard Ratatui com **mouse** (clique em abas/toggles/botões, scroll nas listas): `[F1] Biblioteca · [F2] Instalar (navegador de ISOs + staging) · [F3] Boot Kit · [F4] Capas/Cheats · [F5] Ajuda`, seletor de mídia `[F6]`, wizard de primeiro uso, progresso por fases com ETA/MB/s |
+| **AppImage 1-clique (MP6)** | `dist/` | `AppRun` detecta o emulador de terminal do desktop (Alacritty/Kitty/Foot/Konsole/GNOME…) e abre a TUI automaticamente com 2 cliques — zero comandos, zero flags. CI gera `ps2-manager-x86_64.AppImage` |
 
 ## Build
 
@@ -38,8 +41,11 @@ Requisitos: Rust 1.75+ (testado com 1.99). Zero dependências de sistema além d
 # Analisar uma ISO (sem mount)
 ps2-manager info GranTurismo4.iso
 
-# Instalar convertendo para ZSO (comprime ~40-60%)
+# Instalar convertendo para ZSO — pipeline seguro (staging SSD → fallocate)
 ps2-manager install GranTurismo4.iso /media/$USER/PS2_SD --zso
+
+# Listar mídias externas seguras (discos do PC nunca aparecem)
+ps2-manager devices
 
 # Smart shrink preservando LBA
 ps2-manager shrink sujo.iso limpo.iso
@@ -79,10 +85,24 @@ Toda a camada binária foi implementada contra o código-fonte real do [Open-PS2
 | Pastas do dispositivo | `sbCreateFolders` (`supportbase.c:842-851`) | ✅ |
 | VMC superblock | `modules/vmc/genvmc/genvmc.c:82-118` | ✅ list · ⚠ PSU experimental |
 
+## AppImage (execução em 1 clique)
+
+Baixe o artifact `ps2-manager-AppImage_x86_64` do [último build](https://github.com/Chrispsz/ps2-manager/actions), dê permissão e **dois cliques**:
+
+```bash
+chmod +x ps2-manager-x86_64.AppImage
+./ps2-manager-x86_64.AppImage      # do terminal: abre direto
+# ou: 2 cliques no Dolphin/Nautilus/Thunar → abre em uma janela de terminal
+```
+
+O `AppRun` interno detecta o emulador de terminal do seu desktop (Alacritty, Kitty, Foot, Konsole, GNOME Terminal…) e abre a TUI interativa automaticamente — sem decorar comandos. Para empacotar manualmente: `./dist/build-appimage.sh`.
+
 ## Arquitetura
 
 ```
 src/
+├── core/     storage.rs (anti-desastre: sysfs + mounts, statvfs, fallocate)
+│             staging.rs (StagingBuffer RAII no SSD local)  pipeline.rs (3 fases)
 ├── iso/       parser.rs (ISO9660 mountless, trait SectorSource p/ ISO ou ZSO)
 │              zso.rs (codec LZ4 paralelo)  shrink.rs (relocação de extents)
 ├── opl/       library.rs (pastas/naming/scan)  ulcfg.rs (USBExtreme+CRC32)
@@ -90,14 +110,18 @@ src/
 ├── vmc/       mod.rs (superblock genvmc, FAT chain, saves, export PSU)
 ├── scrape/    artwork.rs (ps2-covers/GameTDB)  cheats.rs (PNACH→.cht)
 ├── deploy/    github.rs (API releases)  fmcb.rs (BOOT_MC + templates)
-├── tui/       mod.rs (dashboard Ratatui + tokio select loop)
-├── cli.rs     subcomandos clap
-└── main.rs    runtime tokio
+│              bootkit.rs (Boot Kit Essencial + manifest embutido)
+├── tui/       mod.rs (app + abas + mouse)  modals.rs (picker/browser/progresso)
+├── dist/      AppRun (launcher 1-clique)  ps2-manager.desktop  build-appimage.sh
+└── cli.rs     subcomandos clap
 ```
 
 ## Roadmap
 
 - [x] v0.1 — parser ISO9660, ZSO, shrink, ul.cfg, deploy PT-BR, capas, cheats, TUI
+- [x] MP5 — Boot Kit Essencial (`bootkit`, manifest embutido, CI semanal)
+- [x] MP6/7 — TUI com mouse/abas/modais/wizard, AppImage 1-clique, seletor
+      anti-desastre de mídias, pipeline de staging em SSD + fallocate + rollback
 - [ ] v0.2 — import PSU, validação de fragmentação real (FIEMAP), scrapping de ícones `_ICO`
 - [ ] v0.3 — sincronização incremental com o cartão, cache de metadados SQLite
 - [ ] v0.4 — UDPBD server integration (rede para o PS2)

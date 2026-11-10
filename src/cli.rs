@@ -1,6 +1,8 @@
 //! CLI — definição dos subcomandos e execução.
 
-use crate::deploy::{bootkit, fmcb};
+use crate::core::storage;
+use crate::deploy::bootkit;
+use crate::deploy::fmcb;
 use crate::deploy::github::GitHubClient;
 use crate::iso::{parser, shrink, zso};
 use crate::opl::{cfg, library, ulcfg};
@@ -9,8 +11,8 @@ use crate::tui;
 use crate::vmc;
 use clap::{Parser, Subcommand};
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 #[derive(Parser)]
@@ -37,13 +39,16 @@ pub enum Commands {
         #[arg(default_value = ".")]
         dir: PathBuf,
     },
-    /// Instala ISO na estrutura OPL, com naming GAMEID.Título.iso
+    /// Instala ISO na estrutura OPL (staging em SSD → fallocate na mídia)
     Install {
         path: PathBuf,
         device_root: PathBuf,
         /// converte para ZSO durante a instalação
         #[arg(long)]
         zso: bool,
+        /// gravação direta na mídia, sem staging (legado)
+        #[arg(long)]
+        direct: bool,
     },
     /// Converte ISO → ZSO (LZ4 multithread)
     Zso {
@@ -125,10 +130,12 @@ pub enum Commands {
         #[arg(long)]
         list: bool,
     },
-    /// Dashboard interativo (Ratatui TUI)
+    /// Lista mídias externas SEGURAS (discos internos do PC nunca aparecem)
+    Devices {},
+    /// Dashboard interativo (Ratatui TUI, mouse + abas)
     Tui {
-        #[arg(default_value = ".")]
-        dir: PathBuf,
+        /// raiz manual (padrão: seletor automático de mídia)
+        dir: Option<PathBuf>,
     },
 }
 
@@ -221,24 +228,83 @@ pub async fn run(cmd: Commands, token: Option<String>) -> anyhow::Result<()> {
             }
             println!("\n{} jogos", games.len());
         }
-        Commands::Install { path, device_root, zso } => {
-            let total = std::fs::metadata(&path)?.len();
-            let counter = Arc::new(AtomicU64::new(0));
-            let t = attach_ticker(
-                counter.clone(),
-                total,
-                if zso { "ZSO" } else { "Copiando" },
-            );
-            let target = library::install(
-                &path,
-                &device_root,
-                &library::InstallOptions { as_zso: zso },
-                Some(counter),
-            )
-            .await?;
-            t.abort();
-            eprintln!();
-            println!("✓ Instalado: {}", target.display());
+        Commands::Install { path, device_root, zso, direct } => {
+            if direct {
+                // caminho legado: conversão/cópia direta na mídia
+                let total = std::fs::metadata(&path)?.len();
+                let counter = Arc::new(AtomicU64::new(0));
+                let t = attach_ticker(
+                    counter.clone(),
+                    total,
+                    if zso { "ZSO" } else { "Copiando" },
+                );
+                let target = library::install(
+                    &path,
+                    &device_root,
+                    &library::InstallOptions { as_zso: zso },
+                    Some(counter),
+                )
+                .await?;
+                t.abort();
+                eprintln!();
+                println!("✓ Instalado: {}", target.display());
+            } else {
+                // Mega Prompt 7: staging em SSD local → gravação validada
+                if !storage::is_removable_root(&device_root) {
+                    eprintln!(
+                        "⚠ atenção: '{}' não é uma mídia externa detectada — \
+                         prosseguindo por invocação explícita de CLI",
+                        device_root.display()
+                    );
+                }
+                let job = crate::core::pipeline::InstallJob {
+                    target_fs: storage::fs_class_for_root(&device_root),
+                    free_bytes: storage::free_bytes(&device_root),
+                    iso: path.clone(),
+                    target_root: device_root.clone(),
+                    as_zso: zso,
+                    pre_shrink: false,
+                    fallocate: true,
+                    overwrite: false,
+                };
+                let cancel = Arc::new(AtomicBool::new(false));
+                let st = Arc::new(Mutex::new((
+                    crate::core::pipeline::PhaseKind::Analyze,
+                    0u64,
+                    0u64,
+                )));
+                let stop = Arc::new(AtomicBool::new(false));
+                let (s2, stop2) = (st.clone(), stop.clone());
+                let th = std::thread::spawn(move || loop {
+                    if stop2.load(Ordering::Relaxed) {
+                        break;
+                    }
+                    if let Ok(g) = s2.lock() {
+                        let (ph, done, total) = *g;
+                        let pct = if total > 0 {
+                            format!(
+                                "{:>5.1}%",
+                                done.min(total) as f64 / total as f64 * 100.0
+                            )
+                        } else {
+                            "…".to_string()
+                        };
+                        eprint!("\r  {:<34} {:>7}", ph.label(), pct);
+                    }
+                    std::thread::sleep(Duration::from_millis(400));
+                });
+                let res = crate::core::pipeline::staged_install(&job, &|p| {
+                    if let Ok(mut g) = st.lock() {
+                        *g = (p.phase, p.done, p.total);
+                    }
+                }, &cancel);
+                stop.store(true, Ordering::Relaxed);
+                let _ = th.join();
+                eprintln!();
+                let rep = res?;
+                println!("✓ Instalado: {}", rep.final_path.display());
+                println!("  {} · {}", rep.game_id, crate::core::pipeline::summary_line(&rep));
+            }
         }
         Commands::Zso { input, output } => {
             let total = std::fs::metadata(&input)?.len();
@@ -408,6 +474,44 @@ pub async fn run(cmd: Commands, token: Option<String>) -> anyhow::Result<()> {
                 fmt_size(rep.total_bytes),
                 rep.dest.display()
             );
+        }
+        Commands::Devices {} => {
+            let devs = storage::scan_target_devices();
+            if devs.is_empty() {
+                println!("nenhuma mídia externa montada detectada");
+                println!(
+                    "discos do sistema são bloqueados por padrão \
+                     (PS2_MANAGER_ALLOW_INTERNAL=1 libera, por conta e risco)"
+                );
+            }
+            for d in &devs {
+                println!(
+                    "• {} — /dev/{} [{}]{}",
+                    d.display_name(),
+                    d.name,
+                    d.bus.label(),
+                    if d.removable { " removível" } else { "" }
+                );
+                for m in &d.mounts {
+                    let cls = storage::FsClass::from_fs(&m.fs_type);
+                    let note = if cls.bdm_recommended() {
+                        " ← BDM recomendado ✓"
+                    } else if cls == storage::FsClass::Fat32 {
+                        " ← legacy, máx 4 GiB/arquivo"
+                    } else {
+                        ""
+                    };
+                    println!(
+                        "    /dev/{} em {} — {} livre de {} — {}{}",
+                        m.source,
+                        m.mount_point.display(),
+                        fmt_size(m.free_bytes),
+                        fmt_size(m.total_bytes),
+                        m.fs_type,
+                        note
+                    );
+                }
+            }
         }
         Commands::Tui { dir } => {
             tui::run_tui(dir).await?;

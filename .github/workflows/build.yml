@@ -51,3 +51,38 @@ jobs:
             ps2-manager-linux-x86_64-*.tar.gz
             ps2-manager-linux-x86_64-*.tar.gz.sha256
           if-no-files-found: error
+
+  appimage:
+    name: AppImage 1-clique (x86_64)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-unknown-linux-musl
+
+      - name: Install musl tools
+        run: sudo apt-get update && sudo apt-get install -y musl-tools
+
+      - name: Cache cargo registry and build
+        uses: Swatinem/rust-cache@v2
+
+      - name: Build (musl estático)
+        run: cargo build --release --target x86_64-unknown-linux-musl
+
+      - name: Package AppImage (launcher 1-clique + .desktop + ícone)
+        run: |
+          chmod +x dist/AppRun dist/build-appimage.sh
+          ./dist/build-appimage.sh
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ps2-manager-AppImage_x86_64
+          path: |
+            build/ps2-manager-x86_64.AppImage
+            build/ps2-manager-x86_64.AppImage.sha256
+          if-no-files-found: error
