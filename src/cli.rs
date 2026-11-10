@@ -91,6 +91,14 @@ pub enum Commands {
         #[arg(long, default_value = "US,EU,JP")]
         regions: String,
     },
+    /// Gera ícones ART/<ID>_ICO.png (128×128) — ItemIcon dos temas OPL
+    Icons {
+        device_root: PathBuf,
+        #[arg(long, default_value = "8")]
+        concurrency: usize,
+        #[arg(long, default_value = "US,EU,JP")]
+        regions: String,
+    },
     /// Converte PNACH (PCSX2) → CHT/<ID>.cht nativo do OPL
     Cheats {
         device_root: PathBuf,
@@ -172,8 +180,16 @@ pub enum Commands {
 pub enum VmcCmd {
     /// Lista os saves de uma VMC .bin
     List { bin: PathBuf },
-    /// Exporta um save para .psu (experimental)
+    /// Exporta um save para .psu (backup — layout uLE)
     Export { bin: PathBuf, save: String, out: PathBuf },
+    /// Restaura um .psu dentro da VMC (uLE psuPaste)
+    Import {
+        bin: PathBuf,
+        psu: PathBuf,
+        /// Substitui o save existente com o mesmo nome
+        #[arg(long)]
+        overwrite: bool,
+    },
 }
 
 pub fn fmt_size(b: u64) -> String {
@@ -400,6 +416,13 @@ pub async fn run(cmd: Commands, token: Option<String>) -> anyhow::Result<()> {
             let (ok, fail) = artwork::fetch_covers(&device_root, &games, concurrency, &extra, token).await?;
             println!("✓ Capas: {ok} baixadas, {fail} falhas");
         }
+        Commands::Icons { device_root, concurrency, regions } => {
+            let games = library::scan_library(&device_root)?;
+            let extra: Vec<String> = regions.split(',').map(str::trim).map(String::from).collect();
+            println!("gerando ícones _ICO para {} jogos…", games.len());
+            let (ok, fail) = artwork::fetch_icons(&device_root, &games, concurrency, &extra, token).await?;
+            println!("✓ Ícones: {ok} gerados, {fail} falhas");
+        }
         Commands::Cheats { device_root, pnach_dir } => {
             let (ok, skip) = cheats::convert_dir(&device_root, &pnach_dir)?;
             println!("✓ CHT: {ok} convertidos, {skip} ignorados");
@@ -427,6 +450,17 @@ pub async fn run(cmd: Commands, token: Option<String>) -> anyhow::Result<()> {
                 let mut card = vmc::Vmc::open(&bin)?;
                 let n = card.export_psu(&save, &out)?;
                 println!("✓ PSU exportado: {} ({})", out.display(), fmt_size(n));
+            }
+            VmcCmd::Import { bin, psu, overwrite } => {
+                let mut card = vmc::Vmc::open(&bin)?;
+                let rep = card.import_psu(&psu, overwrite)?;
+                println!(
+                    "✓ Save '{}' restaurado: {} arquivo(s), {} — {} cluster(s) usados",
+                    rep.name,
+                    rep.files,
+                    fmt_size(rep.bytes),
+                    rep.clusters_used
+                );
             }
         },
         Commands::Deploy { device_root, repo, list } => {

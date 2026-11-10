@@ -21,8 +21,9 @@ Substitui USBUtil, HDL Dump e OPL Manager (via Wine) com uma suíte 100% Rust �
 | **ul.cfg** | `ulcfg` | Formato USBExtreme de 64 bytes exato (`include/supportbase.h`), com o **CRC32 USBAdvance réplica de `USBA_crc32`** (tabela invertida, XOR invertido, NUL incluso) — validado bit a bit contra o C original; partes `ul.<CRC>.<ID>.<NN>` |
 | **CFG + GSM** | `cfg` | Gera `CFG/<ID>.cfg` com chaves oficiais (`#Name`, `#Media`, `$GSMVMode`…) |
 | **Capas** | `covers` | Baixa da base [xlenore/ps2-covers](https://github.com/xlenore/ps2-covers) (+ GameTDB fallback) e salva `ART/<ID>_COV.png` **140×200** |
+| **Ícones _ICO** | `icons` | Gera `ART/<ID>_ICO.png` **128×128** (sufixo `ICO` do ItemIcon — `themes.c:1064` + `bdmGetImage`): recorte quadrado da capa; sem capa, baixa e grava ambas |
 | **Cheats** | `cheats` | Converte PNACH (PCSX2) → `CHT/<ID>.cht` nativo (formato PS2RD do `cheatman.c`: 16 hex digits, tipos byte/word/extended mapeados para raw CB) |
-| **VMC** | `vmc list` / `vmc export` | Lê superblock genvmc (384 B), caminha FAT e lista saves; exportação `.psu` (experimental) |
+| **VMC** | `vmc list` / `vmc export` / `vmc import` | Leitura **e escrita** com layout `McFsEntry` (ps2sdk) + FAT via `ifc_list` (genvmc): restaura `.psu` do uLE (`import`), faz backup (`export`) e lista saves — import all-or-nothing com rollback de FAT |
 | **Deploy PT-BR** | `deploy` | Baixa o `OPL-PTBR-Mod-Kit-*.zip` da release mais recente (incl. prereleases) e gera `BOOT_MC/{OPL,BOOT,APPS,SYS-CONF}` com instruções |
 | **Boot Kit Essencial** | `bootkit` | Monta `/BOOT_MC/` com os ELFs mais atuais da cena: OPL-Mod-PTBR + **wLaunchELF_ISR** (exFAT/MX4SIO) + **PS2BBL** + **Memory Card Annihilator**, com SHA256 e fonte de cada asset ([detalhes](docs/BOOT_KIT.md)) |
 | **Biblioteca da Cena** | `biblioteca` | Acervo **opcional** em `/BIBLIOTECA/` na mídia: OPL upstream (testes), wLaunchELF p/ cartões 2-em-1 (SD2PSX/MemCard PRO2), OpenTuna (Slims finais/BIOS 2.30) — o MC fica enxuto: copie só o que usar (guia em `LEIA-ME.txt`) |
@@ -94,7 +95,9 @@ Toda a camada binária foi implementada contra o código-fonte real do [Open-PS2
 | .cht (PS2RD) | `src/cheatman.c`, `include/cheatman.h` | ✅ |
 | Arte `_COV.png` | `src/themes.c`, `src/textures.c` | ✅ |
 | Pastas do dispositivo | `sbCreateFolders` (`supportbase.c:842-851`) | ✅ |
-| VMC superblock | `modules/vmc/genvmc/genvmc.c:82-118` | ✅ list · ⚠ PSU experimental |
+| Ícones `_ICO.png` (ItemIcon) | `src/themes.c:1064`, `src/bdmsupport.c bdmGetImage` | ✅ |
+| Entradas de diretório VMC (`McFsEntry`) | ps2sdk `libmc-common.h` + genvmc + uLE `vmc_fs/vmc.h` | ✅ list · import · export |
+| Formato PSU (`psu_header`/`mcTable`) | uLE `filer.c` (backup/restore) | ✅ roundtrip testado |
 
 ## AppImage (execução em 1 clique)
 
@@ -118,7 +121,8 @@ src/
 │              zso.rs (codec LZ4 paralelo)  shrink.rs (relocação de extents)
 ├── opl/       library.rs (pastas/naming/scan)  ulcfg.rs (USBExtreme+CRC32)
 │              cfg.rs (CFG/GSM)
-├── vmc/       mod.rs (superblock genvmc, FAT chain, saves, export PSU)
+├── vmc/       mod.rs (McFsEntry+superblock genvmc, FAT rw via ifc_list,
+│              saves, import/export PSU réplica uLE filer.c)
 ├── scrape/    artwork.rs (ps2-covers/GameTDB)  cheats.rs (PNACH→.cht)
 ├── deploy/    github.rs (API releases)  fmcb.rs (BOOT_MC + templates)
 │              bootkit.rs (Boot Kit Essencial + manifest embutido)

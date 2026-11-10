@@ -594,6 +594,25 @@ impl App {
         });
     }
 
+    fn icons(&mut self, tx: mpsc::UnboundedSender<UiMsg>) {
+        let tx2 = tx.clone();
+        let root = self.root.clone();
+        tokio::spawn(async move {
+            let _ = tx2.send(UiMsg::Log("ícones: gerando ART/<ID>_ICO.png…".into()));
+            let entries = library::scan_library(&root).unwrap_or_default();
+            let token = std::env::var("GITHUB_TOKEN").ok();
+            match crate::scrape::artwork::fetch_icons(&root, &entries, 8, &[], token).await {
+                Ok((ok, fail)) => {
+                    let _ = tx2.send(UiMsg::Log(format!("✓ ícones: {ok} gerados, {fail} falhas")));
+                }
+                Err(e) => {
+                    let _ = tx2.send(UiMsg::Log(format!("✗ ícones falhou: {e}")));
+                }
+            }
+            let _ = tx2.send(UiMsg::Games(library::scan_library(&root).unwrap_or_default()));
+        });
+    }
+
     fn run_cfgs(&mut self, tx: mpsc::UnboundedSender<UiMsg>) {
         if self.busy {
             self.log("ocupado — aguarde a operação atual");
@@ -753,6 +772,7 @@ impl App {
     async fn run_extras(&mut self, idx: usize, tx: mpsc::UnboundedSender<UiMsg>) {
         match idx {
             0 => self.covers(tx),
+            5 => self.icons(tx),
             1 => {
                 let home = home_dir();
                 self.dir_browser = Browser::open(&home);
@@ -967,7 +987,7 @@ impl App {
                     _ => {}
                 },
                 Tab::Extras => match code {
-                    KeyCode::Down | KeyCode::Char('j') => self.extras_sel = (self.extras_sel + 1).min(4),
+                    KeyCode::Down | KeyCode::Char('j') => self.extras_sel = (self.extras_sel + 1).min(5),
                     KeyCode::Up | KeyCode::Char('k') => self.extras_sel = self.extras_sel.saturating_sub(1),
                     KeyCode::Enter => self.run_extras(self.extras_sel, tx).await,
                     KeyCode::Char('g') => self.inst_gsm = if self.inst_gsm == 0 { 2 } else { 0 },
@@ -976,6 +996,7 @@ impl App {
                     KeyCode::Char('3') => self.run_extras(2, tx).await,
                     KeyCode::Char('4') => self.run_extras(3, tx).await,
                     KeyCode::Char('5') => self.run_extras(4, tx).await,
+                    KeyCode::Char('6') => self.run_extras(5, tx).await,
                     _ => {}
                 },
                 Tab::Help => {}
@@ -1103,7 +1124,7 @@ impl App {
                     move_sel(&mut b.selected, b.entries.len(), delta);
                 }
                 Tab::BootKit => move_sel(&mut self.bk_sel, 5, delta),
-                Tab::Extras => move_sel(&mut self.extras_sel, 5, delta),
+                Tab::Extras => move_sel(&mut self.extras_sel, 6, delta),
                 Tab::Help => {}
             },
         }
@@ -1567,12 +1588,13 @@ fn render_bootkit(f: &mut ratatui::Frame, area: Rect, app: &mut App) {
 }
 
 fn render_extras(f: &mut ratatui::Frame, area: Rect, app: &mut App) {
-    let items: [(&str, bool); 5] = [
+    let items: [(&str, bool); 6] = [
         ("Baixar capas (GameTDB + xlenore)", false),
         ("Converter PNACH → CHT (escolher pasta)", false),
         ("Gerar CFG/<ID>.cfg para todos os jogos", false),
         ("Reconstruir ul.cfg (USBExtreme/FAT32)", false),
         ("Diagnóstico completo — testa tudo e grava relatório", false),
+        ("Gerar ícones _ICO (ART/<ID>_ICO.png, 128×128)", false),
     ];
     let mut lines: Vec<Line> = Vec::new();
     for (i, (label, _)) in items.iter().enumerate() {
