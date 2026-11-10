@@ -47,6 +47,10 @@ pub enum Commands {
         /// converte para ZSO durante a instalação
         #[arg(long)]
         zso: bool,
+        /// grava no formato USBExtreme (ul.cfg + partes ul.* — FAT32/legado);
+        /// em FAT32 é automático para imagens acima de 4 GiB
+        #[arg(long)]
+        ul: bool,
         /// gravação direta na mídia, sem staging (legado)
         #[arg(long)]
         direct: bool,
@@ -253,7 +257,10 @@ pub async fn run(cmd: Commands, token: Option<String>) -> anyhow::Result<()> {
             }
             println!("\n{} jogos", games.len());
         }
-        Commands::Install { path, device_root, zso, direct } => {
+        Commands::Install { path, device_root, zso, ul, direct } => {
+            if direct && ul {
+                anyhow::bail!("--ul usa o pipeline com staging (fatia no SSD, grava na mídia) — não combina com --direct");
+            }
             if direct {
                 // caminho legado: conversão/cópia direta na mídia
                 let total = std::fs::metadata(&path)?.len();
@@ -291,6 +298,7 @@ pub async fn run(cmd: Commands, token: Option<String>) -> anyhow::Result<()> {
                     pre_shrink: false,
                     fallocate: true,
                     overwrite: false,
+                    split_ul: ul,
                 };
                 let cancel = Arc::new(AtomicBool::new(false));
                 let st = Arc::new(Mutex::new((

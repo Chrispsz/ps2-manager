@@ -371,6 +371,7 @@ pub async fn run_full(
             pre_shrink: false,
             fallocate: true,
             overwrite: false,
+            split_ul: false,
             free_bytes: core::storage::free_bytes(&tmp),
         };
         let cancel = Arc::new(AtomicBool::new(false));

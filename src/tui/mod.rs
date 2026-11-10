@@ -144,11 +144,14 @@ struct InstallOpts {
     as_zso: bool,
     pre_shrink: bool,
     fallocate: bool,
+    /// formato USBExtreme (ul.cfg + partes ul.*) — legado perfeito;
+    /// em FAT32 também é automático para imagens >4 GiB
+    split_ul: bool,
 }
 
 impl Default for InstallOpts {
     fn default() -> Self {
-        Self { as_zso: true, pre_shrink: false, fallocate: true }
+        Self { as_zso: true, pre_shrink: false, fallocate: true, split_ul: false }
     }
 }
 
@@ -699,6 +702,15 @@ impl App {
             self.modal = Modal::Notify("Arquivo ISO não encontrado.".into());
             return;
         }
+        // o melhor legado possível: FAT32 + ISO crua >4 GiB = USBExtreme automático
+        if media.fs == crate::core::storage::FsClass::Fat32
+            && !self.inst_opts.as_zso
+            && !self.inst_opts.split_ul
+            && std::fs::metadata(&iso)
+                .is_ok_and(|m| m.len() > crate::core::storage::FsClass::Fat32.max_file())
+        {
+            self.log("ISO > 4 GiB em FAT32 — fatiamento USBExtreme (ul.*) automático");
+        }
         self.busy = true;
         self.cancel.store(false, Ordering::Relaxed);
         self.prog = Some(ProgressUi::new());
@@ -716,6 +728,7 @@ impl App {
                 pre_shrink: opts.pre_shrink,
                 fallocate: opts.fallocate,
                 overwrite: false,
+                split_ul: opts.split_ul,
                 free_bytes: if free > 0 { Some(free) } else { None },
             };
             let send = |p: pipeline::Progress| {
@@ -808,7 +821,8 @@ impl App {
         match i {
             0 => self.inst_opts.as_zso = !self.inst_opts.as_zso,
             1 => self.inst_opts.pre_shrink = !self.inst_opts.pre_shrink,
-            _ => self.inst_opts.fallocate = !self.inst_opts.fallocate,
+            2 => self.inst_opts.fallocate = !self.inst_opts.fallocate,
+            _ => self.inst_opts.split_ul = !self.inst_opts.split_ul,
         }
     }
 
@@ -939,6 +953,7 @@ impl App {
                     KeyCode::Char('z') => self.toggle_install_opt(0),
                     KeyCode::Char('x') => self.toggle_install_opt(1),
                     KeyCode::Char('f') => self.toggle_install_opt(2),
+                    KeyCode::Char('u') => self.toggle_install_opt(3),
                     KeyCode::Char('g') if self.browser.selected_file().is_some() => {
                         self.modal = Modal::ConfirmInstall;
                     }
@@ -1427,6 +1442,7 @@ fn render_install(f: &mut ratatui::Frame, area: Rect, app: &mut App) {
         Line::from(format!(" {} Converter para ZSO (LZ4)  [Z]", toggle(o.as_zso))),
         Line::from(format!(" {} Smart Shrink antes        [X]", toggle(o.pre_shrink))),
         Line::from(format!(" {} fallocate (contíguo)      [F]", toggle(o.fallocate))),
+        Line::from(format!(" {} USBExtreme ul.* (legado)  [U]", toggle(o.split_ul))),
         Line::from(""),
         match &app.media {
             Some(m) => Line::from(format!(
@@ -1462,7 +1478,7 @@ fn render_install(f: &mut ratatui::Frame, area: Rect, app: &mut App) {
     f.render_widget(panel, h[1]);
 
     let inner = modals::inner_rect(h[1]);
-    for i in 0..3 {
+    for i in 0..4 {
         app.hits.push((
             Rect { x: inner.x, y: inner.y + 2 + i as u16, width: inner.width, height: 1 },
             Hit::InstToggle(i),
@@ -1470,7 +1486,7 @@ fn render_install(f: &mut ratatui::Frame, area: Rect, app: &mut App) {
     }
     if ready {
         app.hits.push((
-            Rect { x: inner.x, y: inner.y + 8, width: inner.width, height: 1 },
+            Rect { x: inner.x, y: inner.y + 9, width: inner.width, height: 1 },
             Hit::InstGo,
         ));
     }

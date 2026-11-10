@@ -492,10 +492,11 @@ pub fn confirm_install(f: &mut ratatui::Frame, app: &mut App) {
         Line::from(format!(" Arquivo : {fname} ({fsize})")),
         Line::from(format!(" Destino : {media_line}")),
         Line::from(format!(
-            " Opções  : ZSO {} · Shrink {} · fallocate {}",
+            " Opções  : ZSO {} · Shrink {} · fallocate {} · UL {}",
             yn(o.as_zso),
             yn(o.pre_shrink),
-            yn(o.fallocate)
+            yn(o.fallocate),
+            yn(o.split_ul)
         )),
         Line::from(""),
         Line::from(Span::styled(
