@@ -38,13 +38,14 @@ else
     sed -i 's/^Icon=.*/Icon=input-gaming/' "$APPDIR/usr/share/applications/ps2-manager.desktop"
 fi
 
-# AppStream metadata (exigido pelo appimagetool: id reverse-DNS, homepage,
-# developer e content-rating para passar na validação appstreamcli)
+# AppStream metadata (exigido pelo appimagetool: id reverse-DNS minúsculo,
+# arquivo com nome = component-id, homepage, developer e content-rating)
+META_ID="io.github.chrispsz.ps2-manager"
 mkdir -p "$APPDIR/usr/share/metainfo"
-cat > "$APPDIR/usr/share/metainfo/ps2-manager.appdata.xml" <<'XML'
+cat > "$APPDIR/usr/share/metainfo/${META_ID}.metainfo.xml" <<'XML'
 <?xml version="1.0" encoding="UTF-8"?>
 <component type="desktop-application">
-  <id>io.github.Chrispsz.ps2-manager</id>
+  <id>io.github.chrispsz.ps2-manager</id>
   <name>PS2 Manager</name>
   <summary>Gerenciador nativo Linux para coleções PlayStation 2 / OPL</summary>
   <description>
@@ -53,7 +54,7 @@ cat > "$APPDIR/usr/share/metainfo/ps2-manager.appdata.xml" <<'XML'
   </description>
   <url type="homepage">https://github.com/Chrispsz/ps2-manager</url>
   <url type="bugtracker">https://github.com/Chrispsz/ps2-manager/issues</url>
-  <developer id="io.github.Chrispsz">
+  <developer id="io.github.chrispsz">
     <name>Chrispsz</name>
   </developer>
   <content_rating type="oars-1.1"/>
