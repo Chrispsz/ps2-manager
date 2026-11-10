@@ -406,3 +406,113 @@ pub fn ensure_space(free: u64, needed: u64) -> Result<()> {
     }
     Ok(())
 }
+
+// ── FIEMAP — validação real de fragmentação (v0.3) ──────────────────────────
+/// `struct fiemap` do kernel (header de 32 B + array de extents).
+#[repr(C)]
+struct FiemapHdr {
+    start: u64,
+    length: u64,
+    flags: u32,
+    mapped: u32,
+    count: u32,
+    reserved: u32,
+}
+
+/// `struct fiemap_extent` do kernel (48 B).
+#[allow(dead_code)]
+#[repr(C)]
+struct FiemapExtent {
+    logical: u64,
+    physical: u64,
+    length: u64,
+    reserved: u64,
+    flags: u32,
+    r2: [u32; 3],
+}
+
+/// `FS_IOC_FIEMAP` = `_IOWR('f', 11, struct fiemap)` — 0xC020660B.
+const FS_IOC_FIEMAP: libc::c_ulong = 0xC020_660B;
+
+/// Resultado best-effort da análise de fragmentação de um arquivo.
+#[derive(Debug, Clone, Copy)]
+pub struct FragInfo {
+    /// false = o filesystem não implementa FIEMAP (FAT32, tmpfs) — n/d
+    pub supported: bool,
+    /// nº de extents mapeados (teto de 256 por chamada)
+    pub extents: u32,
+}
+
+impl FragInfo {
+    /// `Some(true)` = fragmentado (>1 extent) · `Some(false)` = contíguo ·
+    /// `None` = filesystem sem FIEMAP.
+    pub fn fragmented(&self) -> Option<bool> {
+        if self.supported {
+            Some(self.extents > 1)
+        } else {
+            None
+        }
+    }
+}
+
+/// Conta extents de um arquivo via `ioctl(FS_IOC_FIEMAP)` (Linux ≥ 2.6.28;
+/// ext4/xfs/btrfs e exFAT moderno implementam; FAT32 e tmpfs não →
+/// `supported: false`). Best-effort: nunca é condição de falha da
+/// instalação — o valor entra no relatório como diagnóstico do transporte
+/// USB/SIO2 (extents extras custam seeks no barramento do PS2).
+pub fn fragmentation(file: &fs::File) -> std::io::Result<FragInfo> {
+    use std::os::unix::io::AsRawFd;
+    if file.metadata()?.len() == 0 {
+        return Ok(FragInfo { supported: true, extents: 0 });
+    }
+    const MAX: u32 = 256;
+    let mut buf = vec![0u8; 32 + MAX as usize * std::mem::size_of::<FiemapExtent>()];
+    {
+        // SAFETY: buf tem exatamente FiemapHdr + MAX extents alinhados.
+        let hdr = unsafe { &mut *(buf.as_mut_ptr() as *mut FiemapHdr) };
+        hdr.start = 0;
+        hdr.length = u64::MAX;
+        hdr.flags = 0;
+        hdr.count = MAX;
+        hdr.reserved = 0;
+    }
+    // SAFETY: o kernel escreve apenas dentro de buf (tamanho declarado no
+    // próprio número do ioctl, que codifica o tamanho de `struct fiemap`).
+    let rc = unsafe { libc::ioctl(file.as_raw_fd(), FS_IOC_FIEMAP, buf.as_mut_ptr()) };
+    if rc != 0 {
+        let e = std::io::Error::last_os_error();
+        return match e.raw_os_error() {
+            // FS sem suporte (ENOTTY = ioctl desconhecido; EINVAL/EOPNOTSUPP
+            // = implementação ausente/flags não suportadas)
+            Some(libc::ENOTTY) | Some(libc::EOPNOTSUPP) | Some(libc::EINVAL) => {
+                Ok(FragInfo { supported: false, extents: 0 })
+            }
+            _ => Err(e),
+        };
+    }
+    // SAFETY: leitura do header preenchido pelo kernel.
+    let hdr = unsafe { &*(buf.as_ptr() as *const FiemapHdr) };
+    Ok(FragInfo { supported: true, extents: hdr.mapped })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn fiemap_best_effort() {
+        let tmp = std::env::temp_dir().join(format!("ps2m-frag-t{}.bin", std::process::id()));
+        let _ = fs::remove_file(&tmp);
+        fs::write(&tmp, vec![0xABu8; 128 * 1024]).unwrap();
+        let f = fs::File::open(&tmp).unwrap();
+        let fi = fragmentation(&f).unwrap();
+        // em qualquer filesystem: nunca erro — supported ou n/d
+        if fi.supported {
+            assert!(fi.extents >= 1);
+            assert_eq!(fi.fragmented(), Some(fi.extents > 1));
+        } else {
+            assert_eq!(fi.fragmented(), None);
+        }
+        let _ = fs::remove_file(&tmp);
+    }
+}

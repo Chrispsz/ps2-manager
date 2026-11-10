@@ -97,6 +97,9 @@ pub struct InstallReport {
     pub shrink_saved: u64,
     /// Número de partes ul.* geradas (0 = arquivo único ISO/ZSO).
     pub ul_parts: u8,
+    /// Extents FIEMAP do arquivo final (Some = filesystem com suporte;
+    /// None = n/d — FAT32/tmpfs). >1 extent = fragmentado.
+    pub frag_extents: Option<u32>,
     pub elapsed: Duration,
 }
 
@@ -110,7 +113,7 @@ pub fn summary_line(rep: &InstallReport) -> String {
         "ISO".to_string()
     };
     format!(
-        "{} → {} ({}){} · fallocate {} · {:.1}s",
+        "{} → {} ({}){} · fallocate {} · fragmentos {} · {:.1}s",
         crate::cli::fmt_size(rep.original_bytes),
         crate::cli::fmt_size(rep.written_bytes),
         kind,
@@ -120,6 +123,10 @@ pub fn summary_line(rep: &InstallReport) -> String {
             String::new()
         },
         if rep.fallocate_used { "✓" } else { "n/d" },
+        match rep.frag_extents {
+            Some(n) => n.to_string(),
+            None => "n/d".to_string(),
+        },
         rep.elapsed.as_secs_f64()
     )
 }
@@ -270,6 +277,11 @@ fn install_usbextreme(
     ulcfg::write_ulcfg(&job.target_root, &records)?;
 
     let final_path = dir.join(ulcfg::part_filename(crc, &info.game_id, 0));
+    let frag_extents = fs::File::open(&final_path)
+        .ok()
+        .and_then(|f| storage::fragmentation(&f).ok())
+        .filter(|fi| fi.fragmented().is_some())
+        .map(|fi| fi.extents);
     progress(Progress { phase: PhaseKind::Done, done: 1, total: 1 });
 
     Ok(InstallReport {
@@ -282,6 +294,7 @@ fn install_usbextreme(
         fallocate_used,
         shrink_saved,
         ul_parts: parts,
+        frag_extents,
         elapsed: t0.elapsed(),
     })
 }
@@ -438,6 +451,11 @@ pub fn staged_install(job: &InstallJob, progress: ProgressFn<'_>, cancel: &Atomi
         }
     };
     fs::rename(&dest_part, &dest).map_err(Ps2Error::Io)?;
+    let frag_extents = fs::File::open(&dest)
+        .ok()
+        .and_then(|f| storage::fragmentation(&f).ok())
+        .filter(|fi| fi.fragmented().is_some())
+        .map(|fi| fi.extents);
     progress(Progress { phase: PhaseKind::Done, done: 1, total: 1 });
 
     Ok(InstallReport {
@@ -450,6 +468,7 @@ pub fn staged_install(job: &InstallJob, progress: ProgressFn<'_>, cancel: &Atomi
         fallocate_used,
         shrink_saved,
         ul_parts: 0,
+        frag_extents,
         elapsed: t0.elapsed(),
     })
 }

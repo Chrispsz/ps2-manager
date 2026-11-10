@@ -398,11 +398,16 @@ pub async fn run_full(
                     "Instalação",
                     Status::Pass,
                     format!(
-                        "{} → {}{} · fallocate {} · {:.1}s",
+                        "{} → {}{} · fallocate {} · fragmentação {} · {:.1}s",
                         crate::cli::fmt_size(rep.original_bytes),
                         crate::cli::fmt_size(rep.written_bytes),
                         ganho,
                         if rep.fallocate_used { "✓" } else { "n/d" },
+                        match rep.frag_extents {
+                            Some(1) => "contígua (1 extent ✓)".to_string(),
+                            Some(n) => format!("⚠ {n} extents"),
+                            None => "n/d (FS sem FIEMAP)".to_string(),
+                        },
                         rep.elapsed.as_secs_f64()
                     ),
                     t
