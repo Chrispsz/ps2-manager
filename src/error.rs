@@ -17,7 +17,6 @@ pub enum Ps2Error {
     #[error("VMC inválida: {0}")]
     InvalidVmc(String),
     #[error("PSU inválido: {0}")]
-    #[allow(dead_code)]
     InvalidPsu(String),
     #[error("{0}")]
     Other(String),
