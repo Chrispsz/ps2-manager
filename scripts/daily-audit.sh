@@ -13,6 +13,7 @@ set -uo pipefail
 IFS=$'\n\t'
 
 REPO_DIR="$(cd "$(dirname "$0")/.." && pwd)"
+export PATH="$HOME/.cargo/bin:$PATH"
 MOD_DIR="/home/z/my-project/repos/opl-mod-ptbr"
 SECRETS_FILE="/home/z/my-project/.secrets/github_token"
 TODAY="$(date +%F)"
@@ -81,9 +82,9 @@ for d in "$REPO_DIR" "$MOD_DIR"; do
     br="$(git -C "$d" rev-parse --abbrev-ref HEAD)"
     head_sha="$(git -C "$d" rev-parse --short HEAD)"
     if [[ -z "$st" ]]; then
-      log "✅ \`$(basename "$d")\` [$br @ $head_sha] — working tree limpo"
+      log "✅ \`$(basename "$d")\` — branch $br @ $head_sha — working tree limpo"
     else
-      log "⚠️ \`$(basename "$d")\` [$br @ $head_sha] — mudanças não commitadas:" "" '```' "$st" '```'
+      log "⚠️ \`$(basename "$d")\` — branch $br @ $head_sha — mudanças não commitadas:" "" '```' "$st" '```'
     fi
   else
     log "❌ \`$d\` ausente (repositório não clonado)"

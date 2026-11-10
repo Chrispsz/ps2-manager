@@ -3,3 +3,6 @@ Cargo.lock
 *.zso
 *.iso
 !tests/fixtures/*.iso
+
+# relatórios de auditoria são artefatos locais do sandbox (cron)
+docs/audits/
