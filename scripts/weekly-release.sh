@@ -87,7 +87,9 @@ sed -i "0,/^version = \"${CUR}\"/s//version = \"${NEXT}\"/" Cargo.toml
   fi
 } > CHANGELOG.md
 
-git add Cargo.toml Cargo.lock CHANGELOG.md
+git add Cargo.toml CHANGELOG.md
+# Cargo.lock pode ser ignorado (política bin-only) — só entra se for rastreado
+git ls-files --error-unmatch Cargo.lock >/dev/null 2>&1 && git add Cargo.lock || true
 git commit -q -m "chore(release): ${NEXT} [skip ci]"
 git tag -a "v${NEXT}" -m "PS2 Manager v${NEXT}"
 
