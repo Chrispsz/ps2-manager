@@ -2,6 +2,8 @@
 
 **Gerenciador nativo Linux para coleções de PlayStation 2 / Open PS2 Loader (OPL)** — um único binário em Rust, sem Wine, sem Mono, sem dependências legadas do Windows.
 
+> **Uso em 1 clique:** dois cliques no AppImage (ou `./ps2-manager`) abrem a interface direto — sem terminal aberto, o app lança um automaticamente. Sem argumentos = TUI; subcomandos são só para scripts/usos avançados.
+
 Substitui USBUtil, HDL Dump e OPL Manager (via Wine) com uma suíte 100% Rust — crates sem bibliotecas C (LZ4 puro via `lz4_flex`, TLS via `rustls`).
 
 > Integração direta com o [**OPL-Mod-PTBR**](https://github.com/Chrispsz/OPL-Mod-PTBR): o comando `deploy` baixa o release kit mais recente e monta a pasta `BOOT_MC/` pronta para copiar ao memory card via uLaunchELF.
@@ -24,7 +26,9 @@ Substitui USBUtil, HDL Dump e OPL Manager (via Wine) com uma suíte 100% Rust �
 | **Deploy PT-BR** | `deploy` | Baixa o `OPL-PTBR-Mod-Kit-*.zip` da release mais recente (incl. prereleases) e gera `BOOT_MC/{OPL,BOOT,APPS,SYS-CONF}` com instruções |
 | **Boot Kit Essencial** | `bootkit` | Monta `/BOOT_MC/` com os ELFs mais atuais da cena: OPL-Mod-PTBR + **wLaunchELF_ISR** (exFAT/MX4SIO) + **PS2BBL** + **Memory Card Annihilator**, com SHA256 e fonte de cada asset ([detalhes](docs/BOOT_KIT.md)) |
 | **Biblioteca da Cena** | `biblioteca` | Acervo **opcional** em `/BIBLIOTECA/` na mídia: OPL upstream (testes), wLaunchELF p/ cartões 2-em-1 (SD2PSX/MemCard PRO2), OpenTuna (Slims finais/BIOS 2.30) — o MC fica enxuto: copie só o que usar (guia em `LEIA-ME.txt`) |
-| **TUI** | `tui` | Dashboard Ratatui com **mouse** (clique em abas/toggles/botões, scroll nas listas): `[F1] Biblioteca · [F2] Instalar (navegador de ISOs + staging) · [F3] Boot Kit · [F4] Capas/Cheats · [F5] Ajuda`, seletor de mídia `[F6]`, wizard de primeiro uso, progresso por fases com ETA/MB/s |
+| **TUI** | `tui` / *sem argumentos* | Dashboard Ratatui com **mouse** (clique em abas/toggles/botões, scroll nas listas): `[F1] Biblioteca · [F2] Instalar (navegador de ISOs + staging) · [F3] Boot Kit · [F4] Capas/Cheats · [F5] Ajuda`, seletor de mídia `[F6]`, wizard de primeiro uso, progresso por fases com ETA/MB/s. **É o padrão ao executar o app** |
+| **Diagnóstico** | tecla `d` na TUI / `diag` | **Botão de teste**: exercita TODOS os subsistemas numa sandbox temporária (parser, instalação staging→ZSO, ul.cfg/CFG, capas, GitHub) e grava relatório TXT em `~/.local/share/ps2-manager/reports/`. Com ISO na pasta do AppImage testa a real; sem ISO usa um disco sintético interno |
+| **Log persistente** | `~/.local/share/ps2-manager/logs/` | Toda operação, erro e panic é registrado (rotaciona a 2 MB) — a fonte para detectar e reportar problemas |
 | **AppImage 1-clique (MP6)** | `dist/` | `AppRun` detecta o emulador de terminal do desktop (Alacritty/Kitty/Foot/Konsole/GNOME…) e abre a TUI automaticamente com 2 cliques — zero comandos, zero flags. CI gera `ps2-manager-x86_64.AppImage` |
 
 ## Build
@@ -39,6 +43,12 @@ Requisitos: Rust 1.75+ (testado com 1.99). Zero dependências de sistema além d
 ## Exemplos rápidos
 
 ```bash
+# Interface (padrão) — sem argumentos abre a TUI
+./ps2-manager
+
+# Diagnóstico completo (teste tudo: parser, install, ZSO, capas, GitHub)
+./ps2-manager diag
+
 # Analisar uma ISO (sem mount)
 ps2-manager info GranTurismo4.iso
 

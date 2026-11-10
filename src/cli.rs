@@ -19,12 +19,13 @@ use std::time::Duration;
 #[command(
     name = "ps2-manager",
     version,
-    about = "Gerenciador nativo Linux de coleções PS2/OPL — ISO9660, ZSO, VMC, ul.cfg, deploy OPL-Mod-PTBR",
-    long_about = None
+    about = "Gerenciador nativo Linux de coleções PS2/OPL — rode SEM ARGUMENTOS para abrir a interface",
+    long_about = None,
+    after_help = "Sem argumentos a interface (TUI) abre direto — os subcomandos são para uso avançado/scripts."
 )]
 pub struct Cli {
     #[command(subcommand)]
-    pub command: Commands,
+    pub command: Option<Commands>,
     /// Token GitHub (alternativa à env GITHUB_TOKEN; nunca é gravado em disco)
     #[arg(long, global = true)]
     pub token: Option<String>,
@@ -144,6 +145,15 @@ pub enum Commands {
         /// lista os assets do acervo e sai
         #[arg(long)]
         list: bool,
+    },
+    /// Diagnóstico completo: testa parser, instalação staging→ZSO, ul.cfg/CFG,
+    /// capas e GitHub — grava relatório em ~/.local/share/ps2-manager/reports/
+    Diag {
+        /// diretório onde procurar uma ISO/ZSO real (padrão: pasta do AppImage/executável)
+        dir: Option<PathBuf>,
+        /// pula os testes que exigem internet (capas/GitHub)
+        #[arg(long)]
+        offline: bool,
     },
     /// Lista mídias externas SEGURAS (discos internos do PC nunca aparecem)
     Devices {},
@@ -586,6 +596,24 @@ pub async fn run(cmd: Commands, token: Option<String>) -> anyhow::Result<()> {
                         note
                     );
                 }
+            }
+        }
+        Commands::Diag { dir, offline } => {
+            let scan = dir.or_else(crate::diag::default_scan_dir);
+            println!(
+                "diagnóstico completo — {}\n  mídia de teste: {}\n\n",
+                if offline { "modo offline" } else { "com rede" },
+                scan
+                    .as_ref()
+                    .map(|d| format!("procurando ISO/ZSO em {}", d.display()))
+                    .unwrap_or_else(|| "usará disco sintético interno".into()),
+            );
+            let on_log: std::sync::Arc<dyn Fn(&str) + Send + Sync> =
+                std::sync::Arc::new(|s: &str| println!("{s}"));
+            let rep = crate::diag::run_full(scan.as_deref(), offline, on_log).await;
+            println!("\n{}", crate::diag::summary_text(&rep));
+            if rep.overall == crate::diag::Status::Fail {
+                std::process::exit(1);
             }
         }
         Commands::Tui { dir } => {

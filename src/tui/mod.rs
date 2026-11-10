@@ -113,6 +113,7 @@ enum UiMsg {
     PipeProgress(pipeline::Progress),
     Busy(bool),
     InstallDone(std::result::Result<String, String>),
+    Notify(String),
 }
 
 /// Toggles do painel [F3] — Deploy de Boot Essencial.
@@ -319,7 +320,9 @@ impl App {
     }
 
     fn log(&mut self, s: impl Into<String>) {
-        self.logs.push_back(s.into());
+        let s = s.into();
+        crate::logging::info(&s); // painel Log da TUI → também vai para o arquivo
+        self.logs.push_back(s);
         while self.logs.len() > 200 {
             self.logs.pop_front();
         }
@@ -744,8 +747,34 @@ impl App {
             }
             2 => self.run_cfgs(tx),
             3 => self.run_ulcfg(tx),
+            4 => self.run_diag(tx),
             _ => {}
         }
+    }
+
+    /// Diagnóstico completo — exercita parser, instalação staging→ZSO,
+    /// ul.cfg/CFG, capas e GitHub numa sandbox temporária e grava relatório.
+    fn run_diag(&mut self, tx: mpsc::UnboundedSender<UiMsg>) {
+        if self.busy {
+            self.log("ocupado — aguarde a operação atual");
+            return;
+        }
+        self.busy = true;
+        self.log("diagnóstico: iniciando teste completo (sandbox temporária)…");
+        let tx2 = tx.clone();
+        let tx3 = tx2.clone();
+        let on_log: Arc<dyn Fn(&str) + Send + Sync> = Arc::new(move |s: &str| {
+            let _ = tx3.send(UiMsg::Log(s.to_string()));
+        });
+        tokio::spawn(async move {
+            let rep = crate::diag::run_full(crate::diag::default_scan_dir().as_deref(), false, on_log).await;
+            let summary = crate::diag::summary_text(&rep);
+            if let Some(p) = &rep.report_path {
+                crate::logging::info(&format!("diag: relatório em {}", p.display()));
+            }
+            let _ = tx2.send(UiMsg::Busy(false));
+            let _ = tx2.send(UiMsg::Notify(summary));
+        });
     }
 
     fn game_info(&mut self) {
@@ -865,6 +894,7 @@ impl App {
                 return true;
             }
             KeyCode::F(6) | KeyCode::Char('s') => self.modal = Modal::Picker,
+            KeyCode::Char('d') => self.run_diag(tx),
             KeyCode::Char('r') => {
                 if !self.busy {
                     self.rescan_devices();
@@ -922,7 +952,7 @@ impl App {
                     _ => {}
                 },
                 Tab::Extras => match code {
-                    KeyCode::Down | KeyCode::Char('j') => self.extras_sel = (self.extras_sel + 1).min(3),
+                    KeyCode::Down | KeyCode::Char('j') => self.extras_sel = (self.extras_sel + 1).min(4),
                     KeyCode::Up | KeyCode::Char('k') => self.extras_sel = self.extras_sel.saturating_sub(1),
                     KeyCode::Enter => self.run_extras(self.extras_sel, tx).await,
                     KeyCode::Char('g') => self.inst_gsm = if self.inst_gsm == 0 { 2 } else { 0 },
@@ -930,6 +960,7 @@ impl App {
                     KeyCode::Char('2') => self.run_extras(1, tx).await,
                     KeyCode::Char('3') => self.run_extras(2, tx).await,
                     KeyCode::Char('4') => self.run_extras(3, tx).await,
+                    KeyCode::Char('5') => self.run_extras(4, tx).await,
                     _ => {}
                 },
                 Tab::Help => {}
@@ -981,6 +1012,7 @@ impl App {
                     }
                 }
                 5 => self.modal = Modal::Picker,
+                6 => self.run_diag(tx),
                 _ => {}
             },
             Hit::PickerRow(i) => {
@@ -1056,7 +1088,7 @@ impl App {
                     move_sel(&mut b.selected, b.entries.len(), delta);
                 }
                 Tab::BootKit => move_sel(&mut self.bk_sel, 5, delta),
-                Tab::Extras => move_sel(&mut self.extras_sel, 4, delta),
+                Tab::Extras => move_sel(&mut self.extras_sel, 5, delta),
                 Tab::Help => {}
             },
         }
@@ -1088,6 +1120,10 @@ fn trunc(s: &str, n: usize) -> String {
 fn ui(f: &mut ratatui::Frame, app: &mut App) {
     app.hits.clear();
     let area = f.area();
+    if area.width == 0 || area.height == 0 {
+        // terminal sem dimensões (minimizado/pty 0×0) — nada a desenhar
+        return;
+    }
 
     let mut constraints = vec![
         Constraint::Length(3), // header
@@ -1218,7 +1254,7 @@ fn render_tabbar(f: &mut ratatui::Frame, area: Rect, app: &mut App) {
         x += w + 1;
     }
     let hint = Span::styled(
-        "  F6 mídia · r rescan · q sair",
+        "  F6 mídia · d diagnóstico · r rescan · q sair",
         Style::default().fg(Color::DarkGray),
     );
     spans.push(hint);
@@ -1307,6 +1343,7 @@ fn render_library(f: &mut ratatui::Frame, area: Rect, app: &mut App) {
         "[U] reconstruir ul.cfg",
         "[R] rescan",
         "[F6] trocar de mídia",
+        "[D] diagnóstico completo",
     ];
     let items: Vec<ListItem> = actions
         .iter()
@@ -1514,11 +1551,12 @@ fn render_bootkit(f: &mut ratatui::Frame, area: Rect, app: &mut App) {
 }
 
 fn render_extras(f: &mut ratatui::Frame, area: Rect, app: &mut App) {
-    let items: [(&str, bool); 4] = [
+    let items: [(&str, bool); 5] = [
         ("Baixar capas (GameTDB + xlenore)", false),
         ("Converter PNACH → CHT (escolher pasta)", false),
         ("Gerar CFG/<ID>.cfg para todos os jogos", false),
         ("Reconstruir ul.cfg (USBExtreme/FAT32)", false),
+        ("Diagnóstico completo — testa tudo e grava relatório", false),
     ];
     let mut lines: Vec<Line> = Vec::new();
     for (i, (label, _)) in items.iter().enumerate() {
@@ -1546,14 +1584,14 @@ fn render_extras(f: &mut ratatui::Frame, area: Rect, app: &mut App) {
     );
     f.render_widget(p, area);
     let inner = modals::inner_rect(area);
-    for i in 0..4 {
+    for i in 0..5 {
         app.hits.push((
             Rect { x: inner.x, y: inner.y + i as u16, width: inner.width, height: 1 },
             Hit::ExtraAction(i),
         ));
     }
     app.hits.push((
-        Rect { x: inner.x, y: inner.y + 6, width: inner.width, height: 1 },
+        Rect { x: inner.x, y: inner.y + 5, width: inner.width, height: 1 },
         Hit::ExtraToggle,
     ));
 }
@@ -1561,11 +1599,26 @@ fn render_extras(f: &mut ratatui::Frame, area: Rect, app: &mut App) {
 fn render_help(f: &mut ratatui::Frame, area: Rect, app: &mut App) {
     let _ = app;
     let lines = vec![
+        Line::from(Span::styled("INÍCIO RÁPIDO", Style::default().add_modifier(Modifier::BOLD))),
+        Line::from("  Dois cliques no AppImage (ou ./ps2-manager) abrem a UI direto —"),
+        Line::from("  sem terminal aberto, o app lança um automaticamente. Nada de comandos."),
+        Line::from("  F1 jogos · F2 instalar ISO · F3 boot kit · F4 extras · F5 ajuda"),
+        Line::from(""),
         Line::from(Span::styled("TECLAS", Style::default().add_modifier(Modifier::BOLD))),
         Line::from("  F1–F5   abas · F6/s seletor de mídia · r rescan · q sair"),
         Line::from("  ↑↓/jk   navegar · ENTER confirmar · ESC cancelar/voltar"),
         Line::from("  Backspace  pasta anterior (navegador) · ESPAÇO alterna toggles"),
-        Line::from("  Z/X/F    toggles de instalação · G GSM · C ZSO · A capas"),
+        Line::from("  Z/X/F    toggles de instalação · G GSM · C ZSO · A capas · D diagnóstico"),
+        Line::from(""),
+        Line::from(Span::styled("DIAGNÓSTICO (tecla D)", Style::default().add_modifier(Modifier::BOLD))),
+        Line::from("  Testa TODOS os subsistemas numa sandbox temporária: parser ISO,"),
+        Line::from("  instalação staging→ZSO, ul.cfg/CFG, capas e GitHub. Coloque uma ISO"),
+        Line::from("  na mesma pasta do AppImage para testá-la; sem ISO, um disco sintético"),
+        Line::from("  interno é usado. Relatório TXT em ~/.local/share/ps2-manager/reports/"),
+        Line::from(""),
+        Line::from(Span::styled("LOGS", Style::default().add_modifier(Modifier::BOLD))),
+        Line::from("  Toda operação é registrada em ~/.local/share/ps2-manager/logs/"),
+        Line::from("  (rotaciona a 2 MB). Envie o arquivo ao reportar qualquer problema."),
         Line::from(""),
         Line::from(Span::styled("MOUSE", Style::default().add_modifier(Modifier::BOLD))),
         Line::from("  Clique em abas, toggles, botões, chip da mídia e linhas."),
@@ -1599,16 +1652,87 @@ fn useful_mouse(m: &MouseEvent) -> bool {
     )
 }
 
+/// Lança a TUI num emulador de terminal quando o app foi aberto sem um
+/// (dois cliques no binário cru / gerenciador de arquivos). Procura os
+/// terminais mais comuns; se nenhum existir, tenta aviso gráfico (zenity).
+fn spawn_terminal_self() -> Option<std::process::Child> {
+    #[derive(Clone, Copy)]
+    enum Style {
+        /// `term -e cmd`
+        E,
+        /// `term -- cmd`
+        Dashes,
+        /// `term -x cmd`
+        X,
+        /// `term cmd`
+        Bare,
+    }
+    const CANDIDATES: &[(&str, Style)] = &[
+        ("x-terminal-emulator", Style::E),
+        ("gnome-terminal", Style::Dashes),
+        ("konsole", Style::E),
+        ("alacritty", Style::E),
+        ("kitty", Style::Bare),
+        ("foot", Style::Bare),
+        ("xfce4-terminal", Style::E),
+        ("terminator", Style::E),
+        ("lxterminal", Style::E),
+        ("mate-terminal", Style::X),
+        ("tilix", Style::E),
+        ("xterm", Style::E),
+    ];
+    let exe = std::env::current_exe().ok()?;
+    for (name, style) in CANDIDATES {
+        let mut cmd = std::process::Command::new(name);
+        match style {
+            Style::E => cmd.arg("-e"),
+            Style::Dashes => cmd.arg("--"),
+            Style::X => cmd.arg("-x"),
+            Style::Bare => &mut cmd,
+        };
+        if let Ok(child) = cmd.arg(&exe).spawn() {
+            crate::logging::info(&format!("sem TTY — TUI lançada em {name}"));
+            return Some(child);
+        }
+    }
+    let msg = "PS2 Manager precisa de um terminal para abrir a interface. \
+               Instale um emulador (gnome-terminal, konsole, alacritty, xterm…).";
+    crate::logging::error("sem TTY e nenhum emulador de terminal encontrado");
+    for (dlg, pre) in [
+        ("zenity", &["--error", "--text"][..]),
+        ("kdialog", &["--error"][..]),
+    ] {
+        let mut c = std::process::Command::new(dlg);
+        for a in pre {
+            c.arg(a);
+        }
+        if c.arg(msg).spawn().is_ok() {
+            break;
+        }
+    }
+    None
+}
+
 pub async fn run_tui(manual_root: Option<PathBuf>) -> Result<()> {
     use crossterm::tty::IsTty;
     if !std::io::stdout().is_tty() {
+        // aberto direto do sistema (2 cliques) — lança um terminal com a UI
+        if spawn_terminal_self().is_some() {
+            return Ok(());
+        }
         return Err(crate::error::Ps2Error::Other(
-            "TUI requer terminal interativo (TTY) — use os subcomandos CLI (info/scan/install/…) \
-             ou rode dentro de um terminal real. No AppImage, dê dois cliques no arquivo: o \
-             launcher abre um terminal automaticamente."
+            "TUI requer terminal interativo — nenhum emulador encontrado para abrir \
+             automaticamente. Rode dentro de um terminal real (ex.: gnome-terminal)."
                 .into(),
         ));
     }
+    // panics são registrados no log e o terminal é restaurado antes de sair
+    let default_hook = std::panic::take_hook();
+    std::panic::set_hook(Box::new(move |info| {
+        crate::logging::error(&format!("PANIC: {info}"));
+        ratatui::restore();
+        default_hook(info);
+    }));
     let mut terminal = ratatui::init();
     let _ = crossterm::execute!(std::io::stdout(), crossterm::event::EnableMouseCapture);
     let res = tui_loop(&mut terminal, manual_root).await;
@@ -1646,7 +1770,10 @@ async fn tui_loop(terminal: &mut ratatui::DefaultTerminal, manual_root: Option<P
     if app.modal == Modal::None && app.media.is_none() && app.manual_root.is_none() {
         app.modal = Modal::Picker;
     }
-    app.log("F1–F5 abas · F6 mídia · mouse: clique/scroll · ENTER confirma · q sair");
+    app.log("F1–F5 abas · F6 mídia · mouse: clique/scroll · d diagnóstico · q sair");
+    if let Some(lp) = crate::logging::path() {
+        app.log(format!("log em {}", lp.display()));
+    }
     app.rescan();
 
     loop {
@@ -1685,6 +1812,10 @@ async fn tui_loop(terminal: &mut ratatui::DefaultTerminal, manual_root: Option<P
                         }
                     }
                     Some(UiMsg::Busy(b)) => app.busy = b,
+                    Some(UiMsg::Notify(s)) => {
+                        app.busy = false;
+                        app.modal = Modal::Notify(s);
+                    }
                     Some(UiMsg::InstallDone(r)) => {
                         app.busy = false;
                         if let Some(pr) = &mut app.prog {
