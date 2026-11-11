@@ -403,7 +403,12 @@ pub async fn run(cmd: Commands, token: Option<String>) -> anyhow::Result<()> {
                     vmode: v,
                     ..Default::default()
                 });
-                let p = cfg::write_game_cfg(&device_root, &info, gsm)?;
+                let p = cfg::write_game_cfg(
+                    &device_root,
+                    &info,
+                    gsm,
+                    device_root.join("CHT").join(format!("{}.cht", info.game_id)).exists(),
+                )?;
                 println!("✓ {}", p.display());
                 n += 1;
             }

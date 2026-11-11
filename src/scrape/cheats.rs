@@ -100,6 +100,30 @@ pub fn parse_pnach(text: &str) -> Vec<CheatGroup> {
             }
             continue;
         }
+        // cheatman.c trunca a linha no "//"/"#" (term_str + is_cmt_str):
+        // `10B8DAFA 00003F00 // nota` é um CÓDIGO válido, não um nome.
+        // Mesma regra aqui antes de tratar linha solta como nome de grupo.
+        let toks: Vec<&str> = t.split_whitespace().collect();
+        if toks.len() >= 2
+            && toks[0].len() == 8
+            && toks[1].len() == 8
+            && toks[0].chars().all(|c| c.is_ascii_hexdigit())
+            && toks[1].chars().all(|c| c.is_ascii_hexdigit())
+        {
+            if let (Ok(addr), Ok(val)) = (
+                u32::from_str_radix(toks[0], 16),
+                u32::from_str_radix(toks[1], 16),
+            ) {
+                current
+                    .get_or_insert_with(|| CheatGroup {
+                        name: "Cheats".into(),
+                        codes: Vec::new(),
+                    })
+                    .codes
+                    .push(RawCode { address: addr, value: val });
+            }
+            continue;
+        }
         // linha solta não-código → nome de grupo (mesma regra do cheatman.c)
         if !t.chars().all(|c| c.is_ascii_hexdigit() || c.is_whitespace()) {
             push_group(current.take(), &mut groups);
@@ -175,4 +199,49 @@ pub fn convert_dir(device_root: &Path, pnach_dir: &Path) -> Result<(usize, usize
         ok += 1;
     }
     Ok((ok, skip))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn pnach_basico_e_inline_comment() {
+        let pnach = "\
+comment=Trapaças do jogo
+patch=1,EE,10B8DAFA,extended,00003F00
+patch=1,EE,20123456,word,00001234
+patch=1,EE,30000000,byte,FF";
+        let groups = parse_pnach(pnach);
+        assert_eq!(groups.len(), 1);
+        assert_eq!(groups[0].name, "Trapaças do jogo");
+        assert_eq!(groups[0].codes.len(), 3);
+        // extended → 0x2xxxxxxx; word → 0x1xxxxxxx; byte → cru
+        assert_eq!(groups[0].codes[0].address, 0x2000_0000 | 0x00B8_DAFA);
+        assert_eq!(groups[0].codes[0].value, 0x0000_3F00);
+        assert_eq!(groups[0].codes[1].address, 0x1000_0000 | 0x0012_3456);
+        assert_eq!(groups[0].codes[1].value, 0x1234);
+        assert_eq!(groups[0].codes[2].address & 0xF000_0000, 0x0000_0000);
+        assert_eq!(groups[0].codes[2].value & 0xFF, 0xFF);
+    }
+
+    #[test]
+    fn cht_com_comentario_inline_mantem_codigo() {
+        // linha de código com comentário no final — cheatman.c trunca no "//"
+        let cht_in = "Vidas infinitas\n10B8DAFA 00003F00 // nota solta\n20123456 00001234";
+        let groups = parse_pnach(cht_in);
+        assert_eq!(groups.len(), 1);
+        assert_eq!(groups[0].name, "Vidas infinitas");
+        assert_eq!(groups[0].codes.len(), 2);
+        assert_eq!(groups[0].codes[0].address, 0x10B8_DAFA);
+    }
+
+    #[test]
+    fn nomes_apos_codigo_abrem_grupo_novo() {
+        let text = "Grupo A\n10B8DAFA 00003F00\nGrupo B\n20123456 00001234";
+        let groups = parse_pnach(text);
+        assert_eq!(groups.len(), 2);
+        assert_eq!(groups[0].name, "Grupo A");
+        assert_eq!(groups[1].name, "Grupo B");
+    }
 }

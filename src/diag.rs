@@ -452,8 +452,8 @@ pub async fn run_full(
                 })
             })
             .unwrap_or(false);
-        // 6c. CFG/<ID>.cfg para o jogo instalado
-        let cfgp = cfg::write_game_cfg(&tmp, &info, None);
+        // 6c. CFG/<ID>.cfg para o jogo instalado (sem CHT no diag → sem $EnableCheat)
+        let cfgp = cfg::write_game_cfg(&tmp, &info, None, false);
         let cfg_ok = cfgp.is_ok();
         if found && ul_built && ulcfg_ok && parts_ok && cfg_ok {
             let ulsz = ul_dir.join("ul.cfg").metadata().map(|m| m.len()).unwrap_or(0);

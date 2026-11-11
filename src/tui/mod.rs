@@ -637,7 +637,12 @@ impl App {
                         continue;
                     }
                     let info = crate::iso::parser::analyze_path(&g.path)?;
-                    crate::opl::cfg::write_game_cfg(&root, &info, gsm)?;
+                    crate::opl::cfg::write_game_cfg(
+                        &root,
+                        &info,
+                        gsm,
+                        root.join("CHT").join(format!("{}.cht", info.game_id)).exists(),
+                    )?;
                     n += 1;
                 }
                 Ok(n)
