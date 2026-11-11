@@ -19,7 +19,7 @@ Substitui USBUtil, HDL Dump e OPL Manager (via Wine) com uma suíte 100% Rust �
 | **Pipeline Staged (MP7)** | `install` | **Anti-desastre + staging em SSD**: conversão ZSO no disco do PC (`~/.cache/ps2-manager`) → validação de integridade (header + Game ID) → `fallocate` + streaming I/O na mídia → rollback automático em `.part` (cancelamento nunca deixa arquivo parcial) |
 | **Seletor de Mídias (MP7)** | `devices` / TUI `[F6]` | Lista **apenas** removíveis/USB/SD com montagem (sysfs + `/proc/self/mounts`, **zero libudev**). Discos internos (`/`, `/boot`, `/home`, NVMe, virtio, md/dm/zram) **nunca** aparecem — override de dev: `PS2_MANAGER_ALLOW_INTERNAL=1` |
 | **ul.cfg** | `ulcfg` | Formato USBExtreme de 64 bytes exato (`include/supportbase.h`), com o **CRC32 USBAdvance réplica de `USBA_crc32`** (tabela invertida, XOR invertido, NUL incluso) — validado bit a bit contra o C original; partes `ul.<CRC>.<ID>.<NN>` |
-| **CFG + GSM** | `cfg` | Gera `CFG/<ID>.cfg` com chaves oficiais (`#Name`, `#Media`, `$GSMVMode`…) |
+| **CFG + GSM** | `cfg` | Gera `CFG/<ID>.cfg` com chaves oficiais (`#Name`, `#Media`, `$GSMVMode`…) + **`$EnableCheat=1` automático** quando `CHT/<ID>.cht` existe (`cheatman.c` lê do CFG do jogo e liga o motor PS2RD sem intervenção) |
 | **Capas** | `covers` | Baixa da base [xlenore/ps2-covers](https://github.com/xlenore/ps2-covers) (+ GameTDB fallback) e salva `ART/<ID>_COV.png` **140×200** |
 | **Ícones _ICO** | `icons` | Gera `ART/<ID>_ICO.png` **128×128** (sufixo `ICO` do ItemIcon — `themes.c:1064` + `bdmGetImage`): recorte quadrado da capa; sem capa, baixa e grava ambas |
 | **Cheats** | `cheats` | Converte PNACH (PCSX2) → `CHT/<ID>.cht` nativo (formato PS2RD do `cheatman.c`: 16 hex digits, tipos byte/word/extended mapeados para raw CB) |
@@ -92,7 +92,7 @@ Toda a camada binária foi implementada contra o código-fonte real do [Open-PS2
 | CRC32 USBAdvance | `src/system.c:299-325` (`USBA_crc32`) | ✅ bit-exact vs gcc |
 | ZSO header + índice | `modules/isofs/zso.h/c`, `pc/ziso.py` | ✅ roundtrip MD5 |
 | SYSTEM.CNF / BOOT2 | `src/ps2cnf.c` | ✅ |
-| .cht (PS2RD) | `src/cheatman.c`, `include/cheatman.h` | ✅ |
+| .cht (PS2RD) | `src/cheatman.c`, `include/cheatman.h` | ✅ MAX_CODES 250 · comentários `//`/`#` · código com comentário inline truncado (`term_str`/`is_cmt_str`) |
 | Arte `_COV.png` | `src/themes.c`, `src/textures.c` | ✅ |
 | Pastas do dispositivo | `sbCreateFolders` (`supportbase.c:842-851`) | ✅ |
 | Ícones `_ICO.png` (ItemIcon) | `src/themes.c:1064`, `src/bdmsupport.c bdmGetImage` | ✅ |
