@@ -431,7 +431,13 @@ struct FiemapExtent {
     r2: [u32; 3],
 }
 
-/// `FS_IOC_FIEMAP` = `_IOWR('f', 11, struct fiemap)` — 0xC020660B.
+/// `FS_IOC_FIEMAP` = `_IOWR('f', 11, struct fiemap)` = 0xC020660B.
+/// Tipo do request difere por libc: glibc usa `c_ulong`, musl usa
+/// `c_int` (o kernel trunca para `unsigned int` no syscall, então o
+/// bit-pattern chega correto nos dois ambientes).
+#[cfg(target_env = "musl")]
+const FS_IOC_FIEMAP: libc::c_int = 0xC020_660Bu32 as libc::c_int;
+#[cfg(not(target_env = "musl"))]
 const FS_IOC_FIEMAP: libc::c_ulong = 0xC020_660B;
 
 /// Resultado best-effort da análise de fragmentação de um arquivo.
